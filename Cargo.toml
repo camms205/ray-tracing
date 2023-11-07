@@ -1,0 +1,20 @@
+[package]
+name = "ray-tracing"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "ray-tracing"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bevy = "0.12.0"
+itertools = "0.11.0"
+
+# Enable a small amount of optimization in debug mode
+[profile.dev]
+opt-level = 1
+
+# Enable high optimizations for dependencies (incl. Bevy), but not for our code:
+[profile.dev.package."*"]
+opt-level = 3
