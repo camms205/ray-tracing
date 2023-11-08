@@ -4,17 +4,24 @@ use bevy_egui::{egui, EguiContexts};
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use ray_tracing::hittable::Hittable;
 use ray_tracing::shapes::{Shape, Shapes};
-use ray_tracing::{camera::Camera, shapes::Sphere};
+use ray_tracing::{camera::Camera, shapes::*};
 
 fn main() {
     App::new()
         .add_plugins((DefaultPlugins, Camera::new(45.0, 0.1, 100.0)))
         .insert_resource(ImageHandle::default())
-        .insert_resource(Shapes::new(vec![Shape::Sphere(Sphere {
-            center: vec3(0.0, 0.0, 0.0),
-            radius: 0.5,
-            albedo: Color::rgb(1.0, 0.0, 1.0),
-        })]))
+        .insert_resource(Shapes::new(vec![
+            Shape::Sphere(Sphere {
+                center: vec3(0.0, 0.0, 0.0),
+                radius: 0.5,
+                albedo: Color::rgb(1.0, 0.0, 1.0),
+            }),
+            Shape::Plane(Plane {
+                point: vec3(0.0, -1.0, 0.0),
+                normal: Vec3::Y,
+                albedo: Color::rgb(0.2, 0.3, 0.8),
+            }),
+        ]))
         .register_type::<Shapes>()
         .add_plugins(WorldInspectorPlugin::new())
         .add_systems(Startup, setup)
@@ -96,7 +103,7 @@ fn update(
 
 fn get_col(ray: Ray, shapes: &Res<Shapes>) -> Color {
     if let Some(hit_record) = shapes.hit(&ray, 0.0..100.0) {
-        hit_record.albedo
+        hit_record.albedo * (-hit_record.t + 1.0).clamp(0.0, 1.0)
     } else {
         Color::BLACK
     }

@@ -5,9 +5,10 @@ use crate::hittable::{HitRecord, Hittable};
 use bevy::prelude::*;
 
 #[derive(Reflect, Resource)]
-#[reflect(Resource)]
+#[reflect(Resource, Default)]
 pub enum Shape {
     Sphere(Sphere),
+    Plane(Plane),
 }
 
 impl Default for Shape {
@@ -24,12 +25,13 @@ impl Hittable for Shape {
     ) -> Option<crate::hittable::HitRecord> {
         match self {
             Shape::Sphere(object) => object.hit(ray, interval),
+            Shape::Plane(object) => object.hit(ray, interval),
         }
     }
 }
 
 #[derive(Reflect, Resource, Default)]
-#[reflect(Resource)]
+#[reflect(Resource, Default)]
 pub struct Shapes(pub Vec<Shape>);
 
 impl Shapes {
@@ -44,8 +46,8 @@ impl Hittable for Shapes {
     }
 }
 
-#[derive(Reflect, Resource, Default)]
-#[reflect(Resource)]
+#[derive(Reflect, Default)]
+#[reflect(Default)]
 pub struct Sphere {
     pub center: Vec3,
     pub radius: f32,
@@ -77,6 +79,26 @@ impl Hittable for Sphere {
             normal: norm,
             t: closest_t,
             albedo: col,
+        })
+    }
+}
+
+#[derive(Reflect, Default)]
+#[reflect(Default)]
+pub struct Plane {
+    pub point: Vec3,
+    pub normal: Vec3,
+    pub albedo: Color,
+}
+
+impl Hittable for Plane {
+    fn hit(&self, ray: &Ray, interval: Range<f32>) -> Option<HitRecord> {
+        let t = self.normal.dot(self.point - ray.origin) / self.normal.dot(ray.direction);
+        (interval.contains(&t)).then_some(HitRecord {
+            point: ray.origin + ray.direction * t,
+            normal: self.normal,
+            t,
+            albedo: self.albedo,
         })
     }
 }

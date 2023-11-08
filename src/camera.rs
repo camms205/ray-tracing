@@ -2,6 +2,7 @@ use bevy::math::vec2;
 use bevy::math::vec3;
 use bevy::math::vec4;
 use bevy::prelude::*;
+use bevy::window::CursorGrabMode;
 
 #[derive(Resource, Default, Reflect, Clone)]
 #[reflect(Resource)]
@@ -15,7 +16,6 @@ pub struct Camera {
     pub far_clip: f32,
     pub position: Vec3,
     pub forward: Vec3,
-    pub right: Vec3,
     pub width: u32,
     pub height: u32,
 }
@@ -24,22 +24,48 @@ impl Plugin for Camera {
     fn build(&self, app: &mut App) {
         app.insert_resource(self.clone())
             .add_systems(PreUpdate, Self::resize)
+            .register_type::<Camera>()
             .add_systems(Update, update);
     }
 }
 
-pub fn update(keys: Res<Input<KeyCode>>, mut camera: ResMut<Camera>, time: Res<Time>) {
+pub fn update(
+    keys: Res<Input<KeyCode>>,
+    mouse_button: Res<Input<MouseButton>>,
+    mut mouse_move: EventReader<bevy::input::mouse::MouseMotion>,
+    mut camera: ResMut<Camera>,
+    time: Res<Time>,
+    mut window: Query<&mut Window>,
+) {
     let dt = time.delta_seconds();
     let speed = 1.0 * dt;
     keys.get_pressed().for_each(|key| {
+        let forward = camera.forward;
+        let right = forward.cross(Vec3::Y);
         match key {
-            KeyCode::W => camera.translate(Vec3::NEG_Z, speed),
-            KeyCode::S => camera.translate(Vec3::Z, speed),
-            KeyCode::A => camera.translate(Vec3::NEG_X, speed),
-            KeyCode::D => camera.translate(Vec3::X, speed),
+            KeyCode::W => camera.translate(forward, speed),
+            KeyCode::S => camera.translate(-forward, speed),
+            KeyCode::A => camera.translate(-right, speed),
+            KeyCode::D => camera.translate(right, speed),
+            KeyCode::Q => camera.translate(-Vec3::Y, speed),
+            KeyCode::E => camera.translate(Vec3::Y, speed),
             _ => {}
         };
     });
+
+    let mut window = window.single_mut();
+    if mouse_button.pressed(MouseButton::Right) {
+        window.cursor.grab_mode = CursorGrabMode::Locked;
+        window.cursor.visible = false;
+        for ev in mouse_move.read() {
+            camera.rotate(ev.delta, speed / 3.0);
+        }
+    } else {
+        window.cursor.grab_mode = CursorGrabMode::None;
+        window.cursor.visible = true;
+    }
+    camera.recalculate_projection();
+    camera.recalculate_view();
 }
 
 impl Camera {
@@ -54,7 +80,6 @@ impl Camera {
             far_clip,
             position: vec3(0.0, 0.0, 3.0),
             forward: vec3(0.0, 0.0, -1.0),
-            right: Vec3::X,
             width: 1,
             height: 1,
         }
@@ -62,7 +87,14 @@ impl Camera {
 
     pub fn translate(&mut self, dir: Vec3, speed: f32) {
         self.position += dir * speed;
-        self.recalculate_view();
+    }
+
+    pub fn rotate(&mut self, delta: Vec2, speed: f32) {
+        let right = self.forward.cross(Vec3::Y);
+        let q = Quat::from_axis_angle(right, -delta.y * speed)
+            .mul_quat(Quat::from_axis_angle(Vec3::Y, -delta.x * speed))
+            .normalize();
+        self.forward = q.mul_vec3(self.forward);
     }
 
     fn resize(mut camera: ResMut<Camera>, window: Query<&Window>) {
