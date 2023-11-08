@@ -2,6 +2,8 @@ use std::ops::Range;
 
 use bevy::prelude::*;
 
+use crate::scene::Mat;
+
 pub trait Hittable {
     fn hit(&self, ray: &Ray, interval: Range<f32>) -> Option<HitRecord>;
 }
@@ -10,7 +12,7 @@ pub struct HitRecord {
     pub point: Vec3,
     pub normal: Vec3,
     pub t: f32,
-    pub albedo: Color,
+    pub material: Mat,
 }
 
 impl<T> Hittable for Vec<T>
