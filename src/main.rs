@@ -2,6 +2,7 @@ use bevy::tasks::TaskPool;
 use bevy::{math::vec3, prelude::*};
 use bevy_egui::{egui, EguiContexts};
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
+use rand::Rng;
 use ray_tracing::camera::Camera;
 use ray_tracing::hittable::Hittable;
 use ray_tracing::scene::Scene;
@@ -48,7 +49,7 @@ fn update(
     image_handle: Res<ImageHandle>,
     mut images: ResMut<Assets<Image>>,
     camera: Res<Camera>,
-    scene: Res<Scene>,
+    mut scene: ResMut<Scene>,
 ) {
     let window = window.single();
     let (width, height) = (
@@ -61,16 +62,16 @@ fn update(
         height,
         depth_or_array_layers: 1,
     });
-    // do magic to spawn a task for each line in the window
-    image.data = TaskPool::new()
+
+    let cols = TaskPool::new()
         .scope(|s| {
             camera.ray_directions().for_each(|row| {
                 s.spawn(async {
-                    row.flat_map(|dir| {
+                    row.flat_map(|direction| {
                         per_pixel(
                             Ray {
                                 origin: camera.position,
-                                direction: dir,
+                                direction,
                             },
                             &scene,
                         )
@@ -83,32 +84,58 @@ fn update(
         .into_iter()
         .flatten()
         .collect::<Vec<u8>>();
+    if scene.accumulate && scene.frame_index != -1 {
+        scene.frame_index += 1;
+        (scene.accumulation, image.data) = scene
+            .accumulation
+            .iter()
+            .zip(cols.iter())
+            .map(|(prev, new)| {
+                let out = prev + (*new as f32 - prev) / scene.frame_index as f32;
+                (out, out as u8)
+            })
+            .unzip();
+    } else {
+        scene.accumulation = cols.iter().map(|p| *p as f32).collect::<Vec<f32>>();
+        scene.frame_index = 1;
+        image.data = cols;
+    }
 }
 
 fn per_pixel(ray: Ray, scene: &Scene) -> Color {
-    let mut col = Color::BLACK;
-    let sky = Color::rgb(0.6, 0.7, 0.9);
-    let mut factor = 1.0;
+    let mut light = Color::BLACK;
+    let mut contribution = Vec3::ONE;
     let mut ray = ray;
-    let bounces = 3;
+    let bounces = 8;
     for _ in 0..bounces {
-        if let Some(hit_record) = scene.hit(&ray, 0.0..100.0) {
-            let light_dir = Vec3::splat(-1.0).normalize();
-            let light_intensity = hit_record.normal.dot(-light_dir);
-            col += hit_record.material.albedo * light_intensity * factor;
-            factor *= 0.5;
-            let dir = ray.direction;
-            let norm = hit_record.normal
-                + hit_record.material.roughness
-                    * (vec3(rand::random(), rand::random(), rand::random()) - 0.5);
+        if let Some(hit_record) = scene.hit(&ray, 0.0001..f32::MAX) {
+            let col = hit_record.material.albedo;
+            light += hit_record.material.get_emission() * contribution;
+            contribution *= vec3(col.r(), col.g(), col.b());
+            let is_specular = hit_record.material.specular_chance >= rand::random();
+            let diffuse = (hit_record.normal + rand_unit()).normalize();
+            let specular =
+                ray.direction - 2.0 * hit_record.normal.dot(ray.direction) * hit_record.normal;
+            let direction = diffuse.lerp(
+                specular,
+                hit_record.material.roughness * is_specular as u8 as f32,
+            );
             ray = Ray {
                 origin: hit_record.point,
-                direction: dir - 2.0 * dir.dot(norm) * norm,
+                direction,
             };
         } else {
-            col += sky * factor;
             break;
         }
     }
-    col
+    light
+}
+
+fn rand_unit() -> Vec3 {
+    let mut rng = rand::thread_rng();
+    vec3(
+        rng.gen_range(-1.0..1.0),
+        rng.gen_range(-1.0..1.0),
+        rng.gen_range(-1.0..1.0),
+    )
 }

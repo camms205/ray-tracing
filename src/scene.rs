@@ -38,7 +38,11 @@ impl Hittable for Shape {
 #[reflect(Resource, Default)]
 pub struct Scene {
     pub shapes: Vec<Shape>,
-    pub accumulation: Option<Vec<Color>>,
+    pub accumulate: bool,
+    #[reflect(ignore)]
+    pub frame_index: i32,
+    #[reflect(ignore)]
+    pub accumulation: Vec<f32>,
 }
 
 impl Default for Scene {
@@ -50,14 +54,34 @@ impl Default for Scene {
                 material: Mat {
                     albedo: Color::rgb(1.0, 0.0, 1.0),
                     roughness: 0.8,
+                    ..Default::default()
+                },
+            }),
+            Shape::Sphere(Sphere {
+                center: vec3(2.0, 0.0, -1.0),
+                radius: 1.0,
+                material: Mat {
+                    albedo: Color::rgb(0.2, 0.7, 0.1),
+                    roughness: 0.6,
+                    ..Default::default()
                 },
             }),
             Shape::Sphere(Sphere {
                 center: vec3(0.0, -101.0, 0.0),
                 radius: 100.0,
                 material: Mat {
-                    albedo: Color::rgb(0.2, 0.3, 1.0),
+                    albedo: Color::rgb(0.2, 0.3, 6.0),
                     roughness: 0.5,
+                    ..Default::default()
+                },
+            }),
+            Shape::Sphere(Sphere {
+                center: vec3(100.0, 101.0, -20.0),
+                radius: 100.0,
+                material: Mat {
+                    emission: 3.0,
+                    emission_color: Color::rgb(0.9, 0.9, 0.7),
+                    ..Default::default()
                 },
             }),
         ])
@@ -69,6 +93,8 @@ impl Plugin for Scene {
         app.insert_resource(Self::default())
             .register_type::<Scene>()
             .register_type::<Mat>()
+            .register_type::<Sphere>()
+            .register_type::<Plane>()
             .register_type::<Shape>();
     }
 }
@@ -77,8 +103,14 @@ impl Scene {
     pub fn new(shapes: Vec<Shape>) -> Self {
         Self {
             shapes,
-            accumulation: None,
+            accumulate: false,
+            frame_index: 0,
+            accumulation: vec![],
         }
+    }
+
+    pub fn resize(&mut self) {
+        self.frame_index = -1;
     }
 }
 
@@ -94,6 +126,16 @@ pub struct Mat {
     pub albedo: Color,
     #[inspector(min = 0.0, max = 1.0, display = NumberDisplay::Slider)]
     pub roughness: f32,
+    #[inspector(min = 0.0, max = f32::MAX, display = NumberDisplay::Drag)]
+    pub emission: f32,
+    pub emission_color: Color,
+    #[inspector(min = 0.0, max = 1.0, display = NumberDisplay::Slider)]
+    pub specular_chance: f32,
+}
+impl Mat {
+    pub fn get_emission(&self) -> Color {
+        self.emission_color * self.emission
+    }
 }
 
 #[derive(Reflect, Default)]

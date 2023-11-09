@@ -97,18 +97,24 @@ impl Camera {
         self.forward = q.mul_vec3(self.forward);
     }
 
-    fn resize(mut camera: ResMut<Camera>, window: Query<&Window>) {
+    fn resize(
+        mut camera: ResMut<Camera>,
+        window: Query<&Window>,
+        scene: ResMut<crate::scene::Scene>,
+    ) {
         let window = window.single();
         camera.on_resize(
             window.resolution.physical_width(),
             window.resolution.physical_height(),
+            scene,
         );
     }
 
-    pub fn on_resize(&mut self, width: u32, height: u32) {
+    pub fn on_resize(&mut self, width: u32, height: u32, mut scene: ResMut<crate::scene::Scene>) {
         if width == self.width && height == self.height {
             return;
         }
+        scene.resize();
 
         self.width = width;
         self.height = height;
