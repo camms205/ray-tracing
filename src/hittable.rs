@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use bevy::prelude::*;
 
-use crate::scene::Mat;
+use crate::material::Mat;
 
 pub trait Hittable {
     fn hit(&self, ray: &Ray, interval: Range<f32>) -> Option<HitRecord>;

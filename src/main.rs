@@ -106,14 +106,21 @@ fn per_pixel(ray: Ray, scene: &Scene) -> Color {
     let mut light = Color::BLACK;
     let mut contribution = Vec3::ONE;
     let mut ray = ray;
-    let bounces = 8;
+    let bounces = 2;
     for _ in 0..bounces {
         if let Some(hit_record) = scene.hit(&ray, 0.0001..f32::MAX) {
             let col = hit_record.material.albedo;
             light += hit_record.material.get_emission() * contribution;
             contribution *= vec3(col.r(), col.g(), col.b());
             let is_specular = hit_record.material.specular_chance >= rand::random();
-            let diffuse = (hit_record.normal + rand_unit()).normalize();
+            let mut rng = rand::thread_rng();
+            let diffuse = (hit_record.normal
+                + vec3(
+                    rng.gen_range(-1.0..1.0),
+                    rng.gen_range(-1.0..1.0),
+                    rng.gen_range(-1.0..1.0),
+                ))
+            .normalize();
             let specular =
                 ray.direction - 2.0 * hit_record.normal.dot(ray.direction) * hit_record.normal;
             let direction = diffuse.lerp(
@@ -131,11 +138,19 @@ fn per_pixel(ray: Ray, scene: &Scene) -> Color {
     light
 }
 
-fn rand_unit() -> Vec3 {
-    let mut rng = rand::thread_rng();
-    vec3(
-        rng.gen_range(-1.0..1.0),
-        rng.gen_range(-1.0..1.0),
-        rng.gen_range(-1.0..1.0),
-    )
+#[derive(Default, Clone)]
+pub struct Reservoir {
+    out: f32,  // output sample
+    wsum: f32, // sum of all weights
+    m: f32,    // number of samples seen
+}
+
+impl Reservoir {
+    pub fn update(&mut self, x: f32, w: f32) {
+        self.wsum += w;
+        self.m += 1.0;
+        if rand::random::<f32>() < (w / self.wsum) {
+            self.out = x;
+        }
+    }
 }
