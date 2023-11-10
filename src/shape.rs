@@ -29,6 +29,7 @@ impl Hittable for Shape {
         }
     }
 }
+
 #[derive(Reflect, Default)]
 #[reflect(Default)]
 pub struct Sphere {

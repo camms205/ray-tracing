@@ -78,7 +78,7 @@ impl Camera {
             vertical_fov,
             near_clip,
             far_clip,
-            position: vec3(0.0, 0.0, 12.0),
+            position: vec3(0.0, 1.0, 12.0),
             forward: vec3(0.0, 0.0, -1.0),
             width: 1,
             height: 1,

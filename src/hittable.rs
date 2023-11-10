@@ -15,6 +15,12 @@ pub struct HitRecord {
     pub material: Mat,
 }
 
+impl<T: Hittable> Hittable for &T {
+    fn hit(&self, ray: &Ray, interval: Range<f32>) -> Option<HitRecord> {
+        (**self).hit(ray, interval)
+    }
+}
+
 impl<T> Hittable for Vec<T>
 where
     T: Hittable + Sync,

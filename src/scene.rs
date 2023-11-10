@@ -1,6 +1,7 @@
 use std::ops::Range;
 
 use crate::hittable::{HitRecord, Hittable};
+use crate::light::{Light, Point};
 use crate::material::Mat;
 use crate::shape::*;
 
@@ -10,6 +11,7 @@ use bevy::{math::vec3, prelude::*};
 #[reflect(Resource, Default)]
 pub struct Scene {
     pub shapes: Vec<Shape>,
+    pub lights: Vec<Light>,
     pub accumulate: bool,
     #[reflect(ignore)]
     pub frame_index: i32,
@@ -19,44 +21,51 @@ pub struct Scene {
 
 impl Default for Scene {
     fn default() -> Self {
-        Scene::new(vec![
-            Shape::Sphere(Sphere {
-                center: vec3(0.0, 0.0, 0.0),
-                radius: 1.0,
-                material: Mat {
-                    albedo: Color::rgb(1.0, 0.0, 1.0),
-                    roughness: 0.8,
-                    ..Default::default()
-                },
-            }),
-            Shape::Sphere(Sphere {
-                center: vec3(2.0, 0.0, -1.0),
-                radius: 1.0,
-                material: Mat {
-                    albedo: Color::rgb(0.2, 0.7, 0.1),
-                    roughness: 0.6,
-                    ..Default::default()
-                },
-            }),
-            Shape::Sphere(Sphere {
-                center: vec3(0.0, -101.0, 0.0),
-                radius: 100.0,
-                material: Mat {
-                    albedo: Color::rgb(0.2, 0.3, 6.0),
-                    roughness: 0.5,
-                    ..Default::default()
-                },
-            }),
-            Shape::Sphere(Sphere {
-                center: vec3(100.0, 101.0, -20.0),
-                radius: 100.0,
-                material: Mat {
-                    emission: 3.0,
-                    emission_color: Color::rgb(0.9, 0.9, 0.7),
-                    ..Default::default()
-                },
-            }),
-        ])
+        Scene::new(
+            vec![
+                Shape::Sphere(Sphere {
+                    center: vec3(0.0, 0.0, 0.0),
+                    radius: 1.0,
+                    material: Mat {
+                        albedo: Color::rgb(1.0, 0.0, 1.0),
+                        roughness: 0.8,
+                        ..Default::default()
+                    },
+                }),
+                Shape::Sphere(Sphere {
+                    center: vec3(2.0, 0.0, -1.0),
+                    radius: 1.0,
+                    material: Mat {
+                        albedo: Color::rgb(0.2, 0.7, 0.1),
+                        roughness: 0.6,
+                        ..Default::default()
+                    },
+                }),
+                Shape::Sphere(Sphere {
+                    center: vec3(0.0, -101.0, 0.0),
+                    radius: 100.0,
+                    material: Mat {
+                        albedo: Color::rgb(0.2, 0.3, 6.0),
+                        roughness: 0.5,
+                        ..Default::default()
+                    },
+                }),
+                // Shape::Sphere(Sphere {
+                //     center: vec3(100.0, 101.0, -20.0),
+                //     radius: 100.0,
+                //     material: Mat::Light(LightMat {
+                //         emission: 3.0,
+                //         emission_color: Color::rgb(0.9, 0.9, 0.7),
+                //         ..Default::default()
+                //     }),
+                // }),
+            ],
+            vec![
+                Light::Point(Point::new(vec3(-50.0, 30.0, 50.0), Color::RED, 1.0)),
+                Light::Point(Point::new(vec3(50.0, 30.0, -50.0), Color::GREEN, 1.0)),
+                Light::Point(Point::new(vec3(-50.0, 30.0, -50.0), Color::BLUE, 1.0)),
+            ],
+        )
     }
 }
 
@@ -72,10 +81,11 @@ impl Plugin for Scene {
 }
 
 impl Scene {
-    pub fn new(shapes: Vec<Shape>) -> Self {
+    pub fn new(shapes: Vec<Shape>, lights: Vec<Light>) -> Self {
         Self {
             shapes,
-            accumulate: true,
+            lights,
+            accumulate: false,
             frame_index: 0,
             accumulation: vec![],
         }
