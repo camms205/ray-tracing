@@ -1,248 +1,355 @@
-use bevy::math::vec3;
-use bevy::prelude::*;
-use bevy::tasks::ComputeTaskPool;
-use bevy_egui::{egui, EguiContexts};
+use bevy::{
+    core_pipeline::{
+        core_3d::{self, MainOpaquePass3dNode},
+        deferred::node::DeferredGBufferPrepassNode,
+        fullscreen_vertex_shader::fullscreen_shader_vertex_state,
+        prepass::{
+            node::PrepassNode, DepthPrepass, MotionVectorPrepass, NormalPrepass,
+            ViewPrepassTextures,
+        },
+        upscaling::UpscalingNode,
+    },
+    ecs::query::QueryItem,
+    pbr::get_bindings,
+    prelude::*,
+    render::{
+        camera::CameraRenderGraph,
+        mesh::InnerMeshVertexBufferLayout,
+        render_graph::{RenderGraphApp, RenderGraphContext, ViewNode, ViewNodeRunner},
+        render_resource::{
+            AsBindGroup, BindGroup, BindGroupEntries, BindGroupLayout, BindGroupLayoutDescriptor,
+            BindGroupLayoutEntry, BindingType, BufferBindingType, CachedRenderPipelineId,
+            ColorTargetState, ColorWrites, FragmentState, LoadOp, MultisampleState, Operations,
+            PipelineCache, PrimitiveState, RawRenderPipelineDescriptor, RenderPassColorAttachment,
+            RenderPassDescriptor, RenderPipelineDescriptor, Sampler, SamplerDescriptor, ShaderRef,
+            ShaderStage, ShaderStages, ShaderType, TextureAspect, TextureFormat,
+            TextureViewDescriptor,
+        },
+        renderer::{RenderContext, RenderDevice},
+        texture::BevyDefault,
+        view::{ViewTarget, ViewUniform, ViewUniforms},
+        RenderApp,
+    },
+};
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
-use rand::Rng;
-use ray_tracing::camera::Camera;
-use ray_tracing::hittable::Hittable;
-use ray_tracing::scene::Scene;
+use ray_tracing::fly_cam::{FlyCam, NoCameraPlayerPlugin};
 
 fn main() {
     App::new()
-        .add_plugins((
-            DefaultPlugins,
-            Camera::new(45.0, 0.1, 100.0),
-            Scene::default(),
-        ))
-        .insert_resource(ImageHandle::default())
+        .add_plugins(DefaultPlugins)
+        // .add_plugins(CpuRaytracing)
+        .add_plugins(RayTracing)
         .add_plugins(WorldInspectorPlugin::new())
-        .add_systems(Startup, setup)
-        .add_systems(Update, update)
-        .add_systems(Update, ui_update)
         .run();
 }
 
-fn ui_update(mut contexts: EguiContexts, time: Res<Time>) {
-    egui::Window::new("Frame time").show(contexts.ctx_mut(), |ui| {
-        ui.label(format!("{}", time.delta_seconds() * 1000.0));
-    });
-}
+struct RayTracing;
 
-#[derive(Resource, Default)]
-struct ImageHandle(Handle<Image>);
+type Type = ViewNodeRunner<DeferredGBufferPrepassNode>;
+
+const RAY_TRACING: &str = "ray_tracing";
+impl Plugin for RayTracing {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((
+            MaterialPlugin::<CustomMaterial>::default(),
+            MaterialPlugin::<PrepassMaterial> {
+                prepass_enabled: false,
+                ..Default::default()
+            },
+            NoCameraPlayerPlugin,
+        ))
+        .register_type::<CustomMaterial>()
+        .add_systems(Startup, setup)
+        .insert_resource(Msaa::Off)
+        .add_systems(Update, (update_quad_pos, rotate));
+        let Ok(render_app) = app.get_sub_app_mut(RenderApp) else {
+            return;
+        };
+        use core_3d::graph::node::*;
+        render_app
+            .add_render_sub_graph(RAY_TRACING)
+            .add_render_graph_node::<ViewNodeRunner<PrepassNode>>(RAY_TRACING, PREPASS)
+            .add_render_graph_node::<ViewNodeRunner<UpscalingNode>>(RAY_TRACING, UPSCALING)
+            .add_render_graph_node::<ViewNodeRunner<RayTracingNode>>(
+                RAY_TRACING,
+                RayTracingNode::NAME,
+            )
+            .add_render_graph_edges(RAY_TRACING, &[PREPASS, RayTracingNode::NAME, UPSCALING]);
+    }
+
+    fn finish(&self, app: &mut App) {
+        let Ok(render_app) = app.get_sub_app_mut(RenderApp) else {
+            return;
+        };
+
+        render_app.init_resource::<RayTracingPipeline>();
+    }
+}
 
 fn setup(
     mut commands: Commands,
-    mut image_handle: ResMut<ImageHandle>,
-    mut images: ResMut<Assets<Image>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<CustomMaterial>>,
+    mut depth: ResMut<Assets<PrepassMaterial>>,
 ) {
-    image_handle.0 = images.add(Image::default());
-    commands.spawn(Camera2dBundle::default());
-    commands.spawn(SpriteBundle {
-        texture: image_handle.0.clone(),
-        ..Default::default()
+    commands.spawn((
+        Camera3dBundle {
+            transform: Transform::from_xyz(0., 0., 3.).looking_at(Vec3::ZERO, Vec3::Y),
+            camera_render_graph: CameraRenderGraph::new(RAY_TRACING),
+            ..default()
+        },
+        DepthPrepass,
+        NormalPrepass,
+        MotionVectorPrepass,
+        FlyCam,
+    ));
+    commands.spawn((
+        MaterialMeshBundle {
+            mesh: meshes.add(shape::Quad::new(Vec2::new(10.0, 10.0)).into()),
+            material: depth.add(PrepassMaterial {}),
+            transform: Transform::from_xyz(0.0, 0.0, 0.0),
+            ..default()
+        },
+        RayTracingOutput,
+    ));
+    commands.spawn(MaterialMeshBundle {
+        mesh: meshes.add(shape::Plane::from_size(5.0).into()),
+        material: materials.add(CustomMaterial::default()),
+        ..default()
+    });
+    commands.spawn((
+        MaterialMeshBundle {
+            mesh: meshes.add(shape::Cube { size: 1.0 }.into()),
+            material: materials.add(CustomMaterial {
+                color: Color::GREEN,
+            }),
+            transform: Transform::from_xyz(-1.0, 0.5, 0.0),
+            ..default()
+        },
+        Rotate,
+    ));
+    commands.spawn(MaterialMeshBundle {
+        mesh: meshes.add(
+            shape::UVSphere {
+                radius: 0.5,
+                sectors: 32,
+                stacks: 32,
+            }
+            .into(),
+        ),
+        material: materials.add(CustomMaterial {
+            color: Color::WHITE,
+        }),
+        transform: Transform::from_xyz(1.0, 0.5, 0.0),
+        ..default()
     });
 }
 
-fn update(
-    window: Query<&Window>,
-    image_handle: Res<ImageHandle>,
-    mut images: ResMut<Assets<Image>>,
-    camera: Res<Camera>,
-    mut scene: ResMut<Scene>,
-) {
-    let window = window.single();
-    let (width, height) = (
-        window.resolution.physical_width(),
-        window.resolution.physical_height(),
-    );
-    let image = images.get_mut(image_handle.0.clone()).unwrap();
-    image.resize(bevy::render::render_resource::Extent3d {
-        width,
-        height,
-        depth_or_array_layers: 1,
+#[derive(Component)]
+struct Rotate;
+fn rotate(mut transforms: Query<&mut Transform, With<Rotate>>, time: Res<Time>) {
+    transforms.for_each_mut(|mut transform| {
+        transform.rotate_y(5. * time.delta_seconds());
     });
+}
 
-    let cols = ComputeTaskPool::get()
-        .scope(|s| {
-            camera.ray_directions().for_each(|row| {
-                s.spawn(async {
-                    row.flat_map(|direction| {
-                        per_pixel(
-                            Ray {
-                                origin: camera.position,
-                                direction,
-                            },
-                            &scene,
-                        )
-                        .as_rgba_u8()
-                    })
-                    .collect::<Vec<u8>>()
-                })
-            });
-        })
-        .into_iter()
-        .flatten()
-        .collect::<Vec<u8>>();
-    if scene.accumulate && scene.frame_index != -1 {
-        scene.frame_index += 1;
-        (scene.accumulation, image.data) = scene
-            .accumulation
-            .iter()
-            .zip(cols.iter())
-            .map(|(prev, new)| {
-                let out = prev + (*new as f32 - prev) / scene.frame_index as f32;
-                (out, out as u8)
-            })
-            .unzip();
-    } else {
-        scene.accumulation = cols.iter().map(|p| *p as f32).collect::<Vec<f32>>();
-        scene.frame_index = 1;
-        image.data = cols;
+#[derive(Component)]
+struct RayTracingOutput;
+fn update_quad_pos(
+    mut quad: Query<&mut Transform, (With<RayTracingOutput>, Without<Camera>)>,
+    camera: Query<&Transform, With<Camera>>,
+) {
+    let mut pos = quad.single_mut();
+    let camera = camera.single();
+    pos.rotation = camera.rotation;
+    pos.translation = camera.translation + camera.forward() * 1.0;
+}
+
+#[derive(Default, Asset, Reflect, AsBindGroup, Debug, Clone)]
+#[reflect(Default)]
+struct CustomMaterial {
+    #[uniform(0)]
+    color: Color,
+}
+
+impl Material for CustomMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/custom_material.wgsl".into()
     }
 }
 
-fn col_to_vec(col: Color) -> Vec3 {
-    vec3(col.r(), col.g(), col.b())
+#[derive(Default, Asset, Reflect, AsBindGroup, Debug, Clone)]
+#[reflect(Default)]
+struct PrepassMaterial {}
+
+impl Material for PrepassMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/show_prepass.wgsl".into()
+    }
 }
 
-fn per_pixel(ray: Ray, scene: &Scene) -> Color {
-    let m = 2;
-    let n = 1;
-    let mut color = Color::BLACK;
-    for _ in 0..n {
-        color += if let Some(hit_record) = scene.hit(&ray, 0.0..f32::MAX) {
-            let lights = &scene.lights;
-            let mut rng = rand::thread_rng();
-            let pos = hit_record.point;
-            let norm = hit_record.normal;
-            let mut reservoir = Reservoir::default();
-            for _ in 0..lights.len().min(m) {
-                let light_index = rng.gen_range(0..lights.len());
-                let light = lights[light_index];
-                let p = 1.0 / lights.len() as f32;
-                let l = (light.get_pos() - pos)
-                    .normalize()
-                    .clamp(Vec3::ZERO, Vec3::ONE);
-                let ndotl = norm.dot(l).clamp(0.0, 1.0);
-                let color = light.sample() * col_to_vec(hit_record.material.albedo) * ndotl;
-                let w = col_to_vec(color).length() / p;
-                reservoir.update(light_index as f32, w);
-            }
-            let light = lights[reservoir.y as usize];
-            let l = (light.get_pos() - pos)
-                .normalize()
-                .clamp(Vec3::ZERO, Vec3::ONE);
-            let ndotl = norm.dot(l).clamp(0.0, 1.0);
-            let color = light.sample() * ndotl;
-            let p_hat = col_to_vec(color).length(); // should be divided by pdf of light sample but point is just 1
-            if p_hat == 0.0 {
-                reservoir.w = 0.0;
-            } else {
-                reservoir.w =
-                    (1.0 / p_hat.max(0.00001)) * (reservoir.wsum / reservoir.m.max(0.000001));
-            }
-            if scene
-                .hit(
-                    &Ray {
-                        origin: pos,
-                        direction: l,
+#[derive(Resource)]
+struct RayTracingPipeline {
+    layout: BindGroupLayout,
+    sampler: Sampler,
+    pipeline_id: CachedRenderPipelineId,
+}
+
+impl FromWorld for RayTracingPipeline {
+    fn from_world(world: &mut World) -> Self {
+        let render_device = world.resource::<RenderDevice>();
+
+        let layout = render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("pipeline_bind_group_layout"),
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(ViewUniform::min_size()),
                     },
-                    0.0001..f32::MAX,
-                )
-                .is_some()
-            {
-                reservoir.w = 0.0;
-            }
-            color * reservoir.w
-        } else {
-            Color::BLACK
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: bevy::render::render_resource::TextureSampleType::Depth,
+                        view_dimension: bevy::render::render_resource::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: bevy::render::render_resource::TextureSampleType::Float {
+                            filterable: false,
+                        },
+                        view_dimension: bevy::render::render_resource::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: bevy::render::render_resource::TextureSampleType::Float {
+                            filterable: false,
+                        },
+                        view_dimension: bevy::render::render_resource::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(
+                        bevy::render::render_resource::SamplerBindingType::Filtering,
+                    ),
+                    count: None,
+                },
+            ],
+        });
+
+        let sampler = render_device.create_sampler(&SamplerDescriptor::default());
+
+        let shader = world
+            .resource::<AssetServer>()
+            .load("shaders/ray_tracing.wgsl");
+        let pipeline_id =
+            world
+                .resource_mut::<PipelineCache>()
+                .queue_render_pipeline(RenderPipelineDescriptor {
+                    label: Some("ray_tracing_pipeline".into()),
+                    layout: vec![layout.clone()],
+                    vertex: fullscreen_shader_vertex_state(),
+                    fragment: Some(FragmentState {
+                        shader,
+                        shader_defs: vec![],
+                        entry_point: "fragment".into(),
+                        targets: vec![Some(ColorTargetState {
+                            format: TextureFormat::bevy_default(),
+                            blend: None,
+                            write_mask: ColorWrites::ALL,
+                        })],
+                    }),
+                    push_constant_ranges: vec![],
+                    primitive: PrimitiveState::default(),
+                    depth_stencil: None,
+                    multisample: MultisampleState::default(),
+                });
+        Self {
+            layout,
+            sampler,
+            pipeline_id,
+        }
+    }
+}
+
+#[derive(Default)]
+struct RayTracingNode;
+impl RayTracingNode {
+    const NAME: &str = "pipeline_node";
+}
+
+impl ViewNode for RayTracingNode {
+    type ViewQuery = (&'static ViewPrepassTextures, &'static ViewTarget);
+
+    fn run(
+        &self,
+        graph: &mut RenderGraphContext,
+        render_context: &mut RenderContext,
+        (view_prepass_textures, view_target): QueryItem<Self::ViewQuery>,
+        world: &World,
+    ) -> Result<(), bevy::render::render_graph::NodeRunError> {
+        let ray_tracing_pipeline = world.resource::<RayTracingPipeline>();
+        let pipeline_cache = world.resource::<PipelineCache>();
+        let Some(pipeline) = pipeline_cache.get_render_pipeline(ray_tracing_pipeline.pipeline_id)
+        else {
+            return Ok(());
         };
-    }
-    color * (1.0 / n as f32)
 
-    // lights.sample();
-    // Path tracing
-    // let mut ray = ray;
-    // let bounces = 8;
-    // for _ in 0..bounces {
-    //     if let Some(hit_record) = scene.hit(&ray, 0.0001..f32::MAX) {
-    //         let direction = match hit_record.material {
-    //             Mat::Standard(mat) => {
-    //                 let col = mat.albedo;
-    //                 contribution *= vec3(col.r(), col.g(), col.b());
-    //                 let is_specular = mat.specular_chance >= rand::random();
-    //                 let mut rng = rand::thread_rng();
-    //                 let diffuse = (hit_record.normal
-    //                     + vec3(
-    //                         rng.gen_range(-1.0..1.0),
-    //                         rng.gen_range(-1.0..1.0),
-    //                         rng.gen_range(-1.0..1.0),
-    //                     ))
-    //                 .normalize();
-    //                 let specular = ray.direction
-    //                     - 2.0 * hit_record.normal.dot(ray.direction) * hit_record.normal;
-    //                 diffuse.lerp(specular, mat.roughness * is_specular as u8 as f32)
-    //             }
-    //             Mat::Light(mat) => {
-    //                 light += mat.get_emission() * contribution;
-    //                 let mut rng = rand::thread_rng();
-    //                 (hit_record.normal
-    //                     + vec3(
-    //                         rng.gen_range(-1.0..1.0),
-    //                         rng.gen_range(-1.0..1.0),
-    //                         rng.gen_range(-1.0..1.0),
-    //                     ))
-    //                 .normalize()
-    //             }
-    //         };
-    //         ray = Ray {
-    //             origin: hit_record.point,
-    //             direction,
-    //         };
-    //     } else {
-    //         break;
-    //     }
-    // }
-}
+        let view_uniforms = world.resource::<ViewUniforms>().uniforms.binding().unwrap();
+        let depth = view_prepass_textures.depth.as_ref().unwrap();
+        let normal = view_prepass_textures.normal.as_ref().unwrap();
+        let motion = view_prepass_textures.motion_vectors.as_ref().unwrap();
 
-#[derive(Default, Clone)]
-pub struct Reservoir {
-    y: f32,    // output sample
-    wsum: f32, // sum of all weights
-    m: f32,    // number of samples seen
-    w: f32,
-}
+        let depth_desc = TextureViewDescriptor {
+            label: Some("prepass_depth"),
+            aspect: TextureAspect::DepthOnly,
+            ..default()
+        };
+        let depth_view = depth.texture.create_view(&depth_desc);
 
-impl Reservoir {
-    pub fn update(&mut self, x: f32, w: f32) {
-        self.wsum += w;
-        self.m += 1.0;
-        if rand::random::<f32>() < (w / self.wsum) {
-            self.y = x;
-        }
-    }
+        let bind_group = render_context.render_device().create_bind_group(
+            "ray_tracing_bind_group",
+            &ray_tracing_pipeline.layout,
+            &BindGroupEntries::sequential((
+                view_uniforms.clone(),
+                &depth_view,
+                &normal.default_view,
+                &motion.default_view,
+                &ray_tracing_pipeline.sampler,
+            )),
+        );
 
-    pub fn combine(reservoirs: Vec<Reservoir>) -> Self {
-        let mut s = Self::default();
-        let mut m = 0.0;
-        for r in reservoirs {
-            s.update(r.y, todo!("p_hat(r.y) * r.w * r.m"));
-            m += r.m;
-        }
-        s.m = m;
-        s.w = todo!("(1/p_hat(s.y))(s.wsum/s.m)");
-        s
-    }
-
-    pub fn ris(num_samples: u32) -> Self {
-        let mut r = Self::default();
-        for _ in 0..num_samples {
-            let sample = todo!();
-            r.update(sample, todo!("weight p_hat(x)/p(x)"));
-        }
-        r.w = todo!("(1/p_hat(r.y))(r.wsum/r.m)");
-        r
+        let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
+            label: Some("ray_tracing_pass"),
+            color_attachments: &[Some(view_target.get_color_attachment(Operations {
+                load: LoadOp::Clear(world.resource::<ClearColor>().0.into()),
+                store: true,
+            }))],
+            depth_stencil_attachment: None,
+        });
+        render_pass.set_render_pipeline(pipeline);
+        render_pass.set_bind_group(0, &bind_group, &[]);
+        render_pass.draw(0..3, 0..1);
+        Ok(())
     }
 }
