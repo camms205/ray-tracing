@@ -5,7 +5,6 @@
 @group(0) @binding(1) var depth_prepass_texture: texture_depth_2d;
 @group(0) @binding(2) var normal_prepass_texture: texture_2d<f32>;
 @group(0) @binding(3) var motion_vector_prepass_texture: texture_2d<f32>;
-@group(0) @binding(4) var texture_sampler: sampler;
 
 struct Ray {
     origin: vec3<f32>,
@@ -33,9 +32,9 @@ fn no_hit() -> HitRecord {
 fn hit_sphere(ray: Ray, sphere: Sphere) -> HitRecord {
     let pos = ray.origin - sphere.center;
     let a = dot(ray.direction, ray.direction);
-    let b = dot(pos, ray.direction);
+    let b = 2. * dot(pos, ray.direction);
     let c = dot(pos, pos) - sphere.radius * sphere.radius;
-    let dis = b * b - a * c;
+    let dis = b * b - 4. * a * c;
     if dis < 0. {
         return no_hit();
     }
@@ -50,28 +49,24 @@ fn hit_sphere(ray: Ray, sphere: Sphere) -> HitRecord {
     let light = dot(norm, -light_dir);
     return HitRecord(true, point, norm, t, sphere.material * light);
 }
+
 @fragment
-fn fragment(in: FullscreenVertexOutput,) -> @location(0) vec4<f32> {
+fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
+    let uv = in.uv * vec2(1., -1.) * 2. - 1.;
+    let origin = view.world_position;
+    let dir1 = view.inverse_view_proj * vec4(uv, 1., 1.);
+    let dir = normalize(dir1.xyz / dir1.w - origin);
+    // let dir = normalize(view.inverse_view * vec4((view.inverse_projection * vec4(uv, -1., 1.)).xyz, 0.)).xyz;
+    let ray = Ray(origin, dir);
     let depth = textureLoad(depth_prepass_texture, vec2<i32>(in.position.xy), 0);
-    let normal = textureLoad(normal_prepass_texture, vec2<i32>(in.position.xy), 0);
-    let normal1 = normal.xyz * 2. - 1.;
+    let normal = textureLoad(normal_prepass_texture, vec2<i32>(in.position.xy), 0).xyz * 2. - 1.;
     let motion_vector = textureLoad(motion_vector_prepass_texture, vec2<i32>(in.position.xy), 0);
-    let uv = (in.uv * 2. - 1.) * vec2(1., 1.);
-    // let dir = view.inverse_view * view.inverse_projection * vec4(uv, 1.,0.);
-    let dir1 = view.inverse_projection * vec4(uv, 1., 0.);
-    let dir = (view.inverse_view * vec4(dir1.xyz, 0.)).xyz;
-    let pos = vec3(0., 1., 3.);
-    let record = hit_sphere(Ray(pos.xyz, dir.xyz), Sphere(vec3(1., 0.5, 0.), 0.5, vec3(1., 0., 1.)));
-    let col = vec3(.6, .3, .9);
-    let light_dir = normalize(vec3(-1.));
-    let light = dot(normal1, -light_dir);
-    // return vec4(col * light, 0.);
-    // return vec4(normal1.xyz, 0.);
-    if record.hit {
-        return vec4(record.color, 0.);
-    } else {
-        return vec4(normal1.xyz, 0.);
-    }
-    // return vec4(uv, 1., 1.);
-    // return vec4(normalize(dir.xyz), 0.);
+    let col = vec3(.2, .7, .9);
+    let sphere = Sphere(vec3(1., 0.5, 1.), 0.5, col);
+    let record = hit_sphere(ray, sphere);
+    // if record.hit {
+        // return vec4(record.color, 1.0);
+    // }
+    // return vec4(depth);
+    return vec4(dir - origin, 1.0);
 }
