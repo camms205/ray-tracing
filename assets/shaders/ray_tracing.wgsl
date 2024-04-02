@@ -75,6 +75,6 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     if record.hit {
         return vec4(record.color / record.t, 1.0);
     }
-    return vec4(depth);
+    return vec4(normal, 1.0);
     // return vec4(dir - origin + depth, 1.0);
 }
