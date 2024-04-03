@@ -52,29 +52,18 @@ fn hit_sphere(ray: Ray, sphere: Sphere) -> HitRecord {
 
 @fragment
 fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
-    let uv = in.uv * vec2(1., -1.) * 2. - 1.;
+    let uv = in.uv * vec2(2.0, -2.0) + vec2(-1.0, 1.0);
     let origin = view.world_position;
-    let ss_near = vec4(uv, 0., 1.);
-    let ss_far = vec4(uv, 1., 1.);
-    let near = view.inverse_view_proj * ss_near;
-    let far = view.inverse_view_proj * ss_far;
-    let dir1 = view.inverse_view_proj * vec4(uv, 1., 1.);
-    // let dir1 = view.inverse_projection * vec4(uv, 1., 1.);
-    // let dir = normalize(dir1.xyz);
-    // let dir = normalize(far.xyz / far.w - near.xyz / near.w);
-    // let dir = normalize(view.inverse_view * vec4((view.inverse_projection * vec4(uv, 0., 1.)).xyz, 1.)).xyz;
-    let ray_world = view.inverse_view_proj * vec4(uv, 0., 1.);
-    let dir = normalize(ray_world.xyz);
+    let dir = normalize(view.inverse_view_proj * vec4(uv, 0.0, 1.0)).xyz;
     let ray = Ray(origin, dir);
     let depth = textureLoad(depth_prepass_texture, vec2<i32>(in.position.xy), 0);
     let normal = textureLoad(normal_prepass_texture, vec2<i32>(in.position.xy), 0).xyz * 2. - 1.;
     let motion_vector = textureLoad(motion_vector_prepass_texture, vec2<i32>(in.position.xy), 0);
     let col = vec3(.2, .7, .9);
-    let sphere = Sphere(vec3(0.), 0.5, col);
+    let sphere = Sphere(vec3(1.0, 0.5, 1.0), 0.5, col);
     let record = hit_sphere(ray, sphere);
     if record.hit {
         return vec4(record.color / record.t, 1.0);
     }
-    return vec4(normal, 1.0);
-    // return vec4(dir - origin + depth, 1.0);
+    return vec4(depth);
 }

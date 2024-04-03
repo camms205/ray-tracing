@@ -116,7 +116,6 @@ impl ViewNode for RayTracingPassNode {
         &'static ExtractedCamera,
         &'static Camera3d,
         &'static ViewTarget,
-        &'static ViewUniformOffset,
         &'static ViewPrepassTextures,
     );
 
@@ -124,9 +123,7 @@ impl ViewNode for RayTracingPassNode {
         &self,
         _graph: &mut bevy::render::render_graph::RenderGraphContext,
         render_context: &mut bevy::render::renderer::RenderContext,
-        (camera, camera_3d, target, view_uniform_offset, view_prepass_textures): QueryItem<
-            Self::ViewQuery,
-        >,
+        (camera, camera_3d, target, view_prepass_textures): QueryItem<Self::ViewQuery>,
         world: &World,
     ) -> Result<(), bevy::render::render_graph::NodeRunError> {
         let view_uniforms = &world.resource::<ViewUniforms>().uniforms;
