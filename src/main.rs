@@ -50,7 +50,7 @@ fn setup(
     commands.spawn((
         Camera3dBundle {
             camera_render_graph: CameraRenderGraph::new(RayTracingGraph),
-            transform: Transform::from_xyz(0., 1.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
+            transform: Transform::from_xyz(0., 3.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
         },
         DepthPrepass,
