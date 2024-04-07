@@ -48,8 +48,8 @@ struct Light {
 }
 
 const RED: vec3<f32> = vec3(1.0, 0.0, 0.0);
-const GREEN: vec3<f32> = vec3(1.0, 0.0, 0.0);
-const BLUE: vec3<f32> = vec3(1.0, 0.0, 0.0);
+const GREEN: vec3<f32> = vec3(0.0, 1.0, 0.0);
+const BLUE: vec3<f32> = vec3(0.0, 0.0, 1.0);
 
 fn sample_lights() -> vec3<f32> {
     var lights = array<Light, 3>(
@@ -57,19 +57,15 @@ fn sample_lights() -> vec3<f32> {
         Light(vec3(50.0, 30.0, -50.0), GREEN, 1.0),
         Light(vec3(-50.0, 30.0, -50.0), BLUE, 1.0),
     );
-    return RED;
+    return lights[randint(3u)].col;
 }
 
 fn randint(max: u32) -> u32 {
-    return u32(rand() * f32(max + 1));
+    return u32(rand()*f32(max));
 }
 
 fn rand() -> f32 {
     return utils::rand(uv, globals);
-}
-
-fn rand3() -> vec3<f32> {
-    return vec3(rand(), rand(), rand());
 }
 
 @fragment
@@ -83,9 +79,9 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let record = hit_scene(Ray(origin, dir));
     var col = vec3(0.0);
     if record.hit {
-        col = record.color / record.t;
-        let record1 = hit_scene(Ray(record.point, rand3()));
-        col += record1.color * 0.5;
+        col = sample_lights();
+        let l = normalize(vec3(1.));
+        col *= record.color * dot(record.normal, l);
     }
     return vec4(col, 1.0);
 }
