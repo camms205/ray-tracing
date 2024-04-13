@@ -7,4 +7,4 @@ edition = "2021"
 
 [dependencies]
 bevy = { version = "0.13.1", default-features = false, features = ["bevy_render", "bevy_asset", "bevy_winit", "wayland", "bevy_core_pipeline", "file_watcher", "tonemapping_luts", "embedded_watcher", "multi-threaded", "bevy_pbr", "dynamic_linking"] }
-bevy-inspector-egui = "0.21.0"
+bevy-inspector-egui = "0.23.4"
