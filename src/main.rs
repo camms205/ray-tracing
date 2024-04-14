@@ -26,20 +26,37 @@ use bevy::{
         RenderApp,
     },
 };
+use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use ray_tracing::fly_cam::{FlyCam, NoCameraPlayerPlugin};
 
 fn main() {
     App::new()
         .add_plugins((
             DefaultPlugins,
-            // WorldInspectorPlugin::default(),
+            WorldInspectorPlugin::default(),
             NoCameraPlayerPlugin,
             RayTracingPlugin,
         ))
         .add_systems(Startup, setup)
+        .add_systems(Update, close_on_q)
         .run();
 }
 
+fn close_on_q(
+    mut commands: Commands,
+    focused_windows: Query<(Entity, &Window)>,
+    input: Res<ButtonInput<KeyCode>>,
+) {
+    for (window, focus) in focused_windows.iter() {
+        if !focus.focused {
+            continue;
+        }
+
+        if input.just_pressed(KeyCode::KeyQ) {
+            commands.entity(window).despawn();
+        }
+    }
+}
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
