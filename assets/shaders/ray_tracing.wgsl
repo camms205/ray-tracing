@@ -4,8 +4,9 @@
 
 #import ray_tracing::utils
 #import ray_tracing::utils::{
-    hit_scene,
-    Ray
+    Ray,
+    Sphere,
+    HitRecord
 }
 
 @group(0) @binding(0) var<uniform> view: View;
@@ -13,14 +14,17 @@
 @group(0) @binding(2) var depth_prepass_texture: texture_depth_2d;
 @group(0) @binding(3) var normal_prepass_texture: texture_2d<f32>;
 @group(0) @binding(4) var motion_vector_prepass_texture: texture_2d<f32>;
+@group(0) @binding(5) var<storage> spheres: array<Sphere>;
+@group(0) @binding(6) var<storage> lights: array<Light>;
+
 
 var<private> uv: vec2<f32>;
 
 struct Reservoir {
-    x: f32,
-    w: f32,
-    w_total: f32,
-    num: u32,
+    x: f32, // the current value
+    w: f32, // the current weight
+    w_total: f32, // cumulative weight
+    num: u32, // number of elements seen
 }
 
 fn new_reservoir() -> Reservoir {
@@ -43,7 +47,7 @@ fn update_reservoir(res: Reservoir, sample: f32, weight: f32) -> Reservoir {
 
 struct Light {
     pos: vec3<f32>,
-    col: vec3<f32>,
+    col: vec4<f32>,
     str: f32,
 }
 
@@ -51,14 +55,32 @@ const RED: vec3<f32> = vec3(1.0, 0.0, 0.0);
 const GREEN: vec3<f32> = vec3(0.0, 1.0, 0.0);
 const BLUE: vec3<f32> = vec3(0.0, 0.0, 1.0);
 
-fn sample_lights() -> vec3<f32> {
-    var lights = array<Light, 3>(
-        Light(vec3(-50.0, 30.0, 50.0), RED, 1.0),
-        Light(vec3(50.0, 30.0, -50.0), GREEN, 1.0),
-        Light(vec3(-50.0, 30.0, -50.0), BLUE, 1.0),
-    );
-    return lights[randint(3u)].col;
+fn sample_lights() -> Light {
+    let length = arrayLength(&lights);
+    if length > 0 {
+        return lights[randint(length)];
+    } else {
+        return Light(vec3(0.0), vec4(0.0), 0.0);
+        // return Light(vec3(0.0), vec4(1.0), 1.0);
+    }
+    // return Light(vec3(0.0, 50.0, 0.0), vec4(1.0), 1.0);
 }
+
+fn hit_scene(ray: Ray) -> HitRecord {
+    var hit = utils::no_hit();
+    let length = i32(arrayLength(&spheres));
+    for (var i = 0; i < length; i++) {
+        let record = utils::hit_sphere(ray, spheres[i]);
+        if !record.hit {
+            continue;
+        }
+        if !hit.hit || hit.t > record.t{
+            hit = record;
+        }
+    }
+    return hit;
+}
+
 
 fn randint(max: u32) -> u32 {
     return u32(rand()*f32(max));
@@ -79,8 +101,9 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let record = hit_scene(Ray(origin, dir));
     var col = vec3(0.0);
     if record.hit {
-        col = sample_lights();
-        let l = normalize(vec3(1.));
+        var light = sample_lights();
+        col = light.col.rgb;
+        let l = normalize(light.pos - record.point);
         col *= record.color * dot(record.normal, l);
     }
     return vec4(col, 1.0);
