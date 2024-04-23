@@ -18,6 +18,7 @@ struct Sphere {
     center: vec3<f32>,
     radius: f32,
     material: vec3<f32>,
+    light: vec3<f32>,
 }
 
 struct HitRecord {
@@ -26,10 +27,11 @@ struct HitRecord {
     normal: vec3<f32>,
     t: f32,
     color: vec3<f32>,
+    light: vec3<f32>,
 }
 
 fn no_hit() -> HitRecord {
-    return HitRecord(false, vec3(0.), vec3(0.), 0., vec3(0.));
+    return HitRecord(false, vec3(0.), vec3(0.), 0., vec3(0.), vec3(0.0));
 }
 
 fn hit_sphere(ray: Ray, sphere: Sphere) -> HitRecord {
@@ -48,9 +50,8 @@ fn hit_sphere(ray: Ray, sphere: Sphere) -> HitRecord {
     let hit = pos + ray.direction * t;
     let norm = normalize(hit);
     let point = hit + sphere.center;
-    let light_dir = normalize(vec3(-1.));
-    let light = dot(norm, -light_dir);
-    return HitRecord(true, point, norm, t, sphere.material * light);
+    let light = sphere.light;
+    return HitRecord(true, point, norm, t, sphere.material, light);
 }
 
 // fn hit_scene(ray: Ray) -> HitRecord {

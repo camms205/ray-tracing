@@ -97,7 +97,7 @@ fn setup(
         transform: Transform::from_xyz(1., 0.5, 1.),
         ..default()
     });
-    commands.spawn(GpuSphere::new(Vec3::ZERO, 1.0, Color::FUCHSIA));
+    commands.spawn(GpuSphere::new(Vec3::ZERO, 1.0, Color::FUCHSIA, Vec3::ZERO));
     commands.spawn(GpuSphere::new(
         Vec3::new(2.0, 0.0, -1.0),
         1.0,
@@ -107,6 +107,7 @@ fn setup(
             blue: 0.1,
             alpha: 1.0,
         },
+        Vec3::ZERO,
     ));
     commands.spawn(GpuSphere::new(
         Vec3::new(0.0, -101.0, 0.0),
@@ -117,11 +118,36 @@ fn setup(
             blue: 6.0,
             alpha: 1.0,
         },
+        Vec3::ZERO,
     ));
-    commands.spawn(Light::new(Vec3::new(-50.0, 30.0, 50.0), Color::RED, 1.0));
-    commands.spawn(Light::new(Vec3::new(50.0, 30.0, -50.0), Color::GREEN, 1.0));
-    commands.spawn(Light::new(Vec3::new(-50.0, 30.0, -50.0), Color::BLUE, 1.0));
-    commands.spawn(Light::new(Vec3::new(0.0, 50.0, 0.0), Color::WHITE, 1.0));
+    commands.spawn(GpuSphere::new(
+        Vec3::new(-50.0, 30.0, 50.0),
+        20.0,
+        Color::BLACK,
+        Vec3::new(1.0, 0.0, 0.0),
+    ));
+    commands.spawn(GpuSphere::new(
+        Vec3::new(50.0, 30.0, -50.0),
+        20.0,
+        Color::BLACK,
+        Vec3::new(0.0, 1.0, 0.0),
+    ));
+    commands.spawn(GpuSphere::new(
+        Vec3::new(-50.0, 30.0, -50.0),
+        20.0,
+        Color::BLACK,
+        Vec3::new(0.0, 0.0, 1.0),
+    ));
+    commands.spawn(GpuSphere::new(
+        Vec3::new(0.0, 50.0, 0.0),
+        20.0,
+        Color::BLACK,
+        Vec3::new(1.0, 1.0, 1.0),
+    ));
+    // commands.spawn(Light::new(Vec3::new(-50.0, 30.0, 50.0), Color::RED, 1.0));
+    // commands.spawn(Light::new(Vec3::new(50.0, 30.0, -50.0), Color::GREEN, 1.0));
+    // commands.spawn(Light::new(Vec3::new(-50.0, 30.0, -50.0), Color::BLUE, 1.0));
+    // commands.spawn(Light::new(Vec3::new(0.0, 50.0, 0.0), Color::WHITE, 1.0));
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
@@ -267,14 +293,16 @@ struct GpuSphere {
     center: Vec3,
     radius: f32,
     color: Color,
+    light: Vec3,
 }
 
 impl GpuSphere {
-    fn new(center: Vec3, radius: f32, color: Color) -> GpuSphere {
+    fn new(center: Vec3, radius: f32, color: Color, light: Vec3) -> GpuSphere {
         Self {
             center,
             radius,
             color,
+            light,
         }
     }
 }

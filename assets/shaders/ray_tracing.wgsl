@@ -90,21 +90,51 @@ fn rand() -> f32 {
     return utils::rand(uv, globals);
 }
 
+fn rand_norm() -> f32 {
+    let theta = 2 * 3.1415926 * rand();
+    let rho = sqrt(-2 * log(rand()));
+    return rho * cos(theta);
+}
+
+fn rand_dir() -> vec3<f32> {
+    return normalize(vec3(rand_norm(), rand_norm(), rand_norm()));
+}
+
+fn rand_hemi(norm: vec3<f32>) -> vec3<f32> {
+    let dir = rand_dir();
+    if dot(norm, dir) < 0 {
+        return -dir;
+    } else {
+        return dir;
+    }
+}
+
 @fragment
 fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     uv = in.uv * vec2(2.0, -2.0) + vec2(-1.0, 1.0);
-    let origin = view.world_position;
-    let dir = normalize(view.inverse_view_proj * vec4(uv, 0.0, 1.0)).xyz;
+    var origin = view.world_position;
+    var dir = normalize(view.inverse_view_proj * vec4(uv, 0.0, 1.0)).xyz;
     let depth = textureLoad(depth_prepass_texture, vec2<i32>(in.position.xy), 0);
     let normal = textureLoad(normal_prepass_texture, vec2<i32>(in.position.xy), 0).xyz * 2. - 1.;
     let motion_vector = textureLoad(motion_vector_prepass_texture, vec2<i32>(in.position.xy), 0);
-    let record = hit_scene(Ray(origin, dir));
-    var col = vec3(0.0);
-    if record.hit {
-        var light = sample_lights();
-        col = light.col.rgb;
-        let l = normalize(light.pos - record.point);
-        col *= record.color * dot(record.normal, l);
+
+    var col = vec3(1.0);
+    var light = vec3(0.0);
+    var ray = Ray(origin, dir);
+    for (var i = 0; i < 4; i++) {
+        let record = hit_scene(ray);
+        if record.hit {
+            ray = Ray(record.point, rand_hemi(record.normal));
+            // var light = sample_lights();
+            // col += light.col.rgb;
+            // let l = normalize(light.pos - record.point);
+            // col *= record.color * dot(record.normal, l);
+            light += record.light * col;
+            col *= record.color;
+        } else {
+            light += vec3(0.02, 0.04, 0.1);
+            break;
+        }
     }
-    return vec4(col, 1.0);
+    return vec4(light, 1.0);
 }
