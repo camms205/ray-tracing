@@ -1,13 +1,8 @@
-use std::ops::Deref;
-
 use bevy::{
     asset::load_internal_asset,
     core_pipeline::{
         fullscreen_vertex_shader::fullscreen_shader_vertex_state,
-        prepass::{
-            node::PrepassNode, DepthPrepass, MotionVectorPrepass, NormalPrepass,
-            ViewPrepassTextures,
-        },
+        prepass::{node::PrepassNode, MotionVectorPrepass, ViewPrepassTextures},
         upscaling::UpscalingNode,
     },
     ecs::query::QueryItem,
@@ -18,12 +13,13 @@ use bevy::{
         extract_resource::{ExtractResource, ExtractResourcePlugin},
         globals::{GlobalsBuffer, GlobalsUniform},
         gpu_component_array_buffer::GpuComponentArrayBufferPlugin,
+        render_asset::{RenderAssetUsages, RenderAssets},
         render_graph::{RenderGraphApp, RenderLabel, RenderSubGraph, ViewNode, ViewNodeRunner},
         render_resource::{
             AsBindGroup, BindGroupEntries, BindGroupLayout, CachedRenderPipelineId,
-            ColorTargetState, ColorWrites, FragmentState, GpuArrayBuffer, MultisampleState,
-            PipelineCache, PrimitiveState, RenderPassDescriptor, RenderPipelineDescriptor,
-            ShaderType, TextureFormat,
+            ColorTargetState, ColorWrites, Extent3d, FragmentState, GpuArrayBuffer,
+            MultisampleState, PipelineCache, PrimitiveState, RenderPassDescriptor,
+            RenderPipelineDescriptor, ShaderType, TextureDimension, TextureFormat, TextureUsages,
         },
         renderer::RenderDevice,
         texture::BevyDefault,
@@ -43,7 +39,7 @@ fn main() {
             RayTracingPlugin,
         ))
         .add_systems(Startup, setup)
-        .add_systems(Update, close_on_q)
+        .add_systems(Update, (close_on_q, update))
         .run();
 }
 
@@ -66,7 +62,22 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
 ) {
+    let mut image = Image::new_fill(
+        Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &[0u8; 4],
+        TextureFormat::Rgba8Unorm,
+        RenderAssetUsages::default(),
+    );
+    image.texture_descriptor.usage = TextureUsages::STORAGE_BINDING;
+    let image = images.add(image);
+    commands.insert_resource(PreviousRender { image });
     let material_black = materials.add(Color::BLACK);
     let material_red = materials.add(Color::RED);
     commands.spawn((
@@ -75,8 +86,6 @@ fn setup(
             transform: Transform::from_xyz(0., 3.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
         },
-        DepthPrepass,
-        NormalPrepass,
         MotionVectorPrepass,
         FlyCam,
     ));
@@ -150,6 +159,24 @@ fn setup(
     // commands.spawn(Light::new(Vec3::new(0.0, 50.0, 0.0), Color::WHITE, 1.0));
 }
 
+fn update(
+    window: Query<&Window>,
+    previous: Res<PreviousRender>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    let window = window.single();
+    let (width, height) = (
+        window.resolution.physical_width(),
+        window.resolution.physical_height(),
+    );
+    let image = images.get_mut(&previous.image).unwrap();
+    image.resize(bevy::render::render_resource::Extent3d {
+        width,
+        height,
+        depth_or_array_layers: 1,
+    });
+}
+
 #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
 struct PrepassLabel;
 
@@ -165,6 +192,11 @@ struct RayTracingGraph;
 const RAY_TRACING_UTILS_HANDLE: Handle<Shader> =
     Handle::weak_from_u128(199877112663398275092447563180262563067);
 
+#[derive(Resource, Default, ExtractResource, Clone)]
+struct PreviousRender {
+    image: Handle<Image>,
+}
+
 struct RayTracingPlugin;
 impl Plugin for RayTracingPlugin {
     fn build(&self, app: &mut App) {
@@ -179,6 +211,7 @@ impl Plugin for RayTracingPlugin {
             .add_plugins(GpuComponentArrayBufferPlugin::<Light>::default())
             .add_plugins(ExtractComponentPlugin::<GpuSphere>::default())
             .add_plugins(ExtractComponentPlugin::<Light>::default())
+            .add_plugins(ExtractResourcePlugin::<PreviousRender>::default())
             .register_type::<Light>()
             .register_type::<GpuSphere>();
         let render_app = app.get_sub_app_mut(RenderApp).unwrap();
@@ -218,9 +251,12 @@ impl ViewNode for RayTracingPassNode {
         let view_uniforms = &world.resource::<ViewUniforms>().uniforms;
         let view_uniforms = view_uniforms.binding().unwrap();
         let globals_uniform = world.resource::<GlobalsBuffer>().buffer.binding().unwrap();
-        let depth = view_prepass_textures.depth_view().unwrap();
-        let normal = view_prepass_textures.normal_view().unwrap();
         let motion = view_prepass_textures.motion_vectors_view().unwrap();
+        let previous = &world
+            .resource::<RenderAssets<Image>>()
+            .get(&world.resource::<PreviousRender>().image)
+            .unwrap()
+            .texture_view;
 
         let ray_tracing_pipeline = world.resource::<RayTracingPipeline>();
         let pipeline_cache = world.resource::<PipelineCache>();
@@ -239,9 +275,8 @@ impl ViewNode for RayTracingPassNode {
             &ray_tracing_pipeline.layout,
             &BindGroupEntries::sequential((
                 view_uniforms,
+                previous,
                 globals_uniform,
-                depth,
-                normal,
                 motion,
                 spheres.binding().unwrap(),
                 lights.binding().unwrap(),
@@ -311,17 +346,15 @@ impl GpuSphere {
 struct RayTracingInfo {
     #[uniform(0)]
     view_uniform: ViewUniform,
-    #[uniform(1)]
+    #[storage_texture(1, visibility(fragment))]
+    previous: Handle<Image>,
+    #[uniform(2)]
     globals: GlobalsUniform,
-    #[texture(2, sample_type = "depth")]
-    depth_view: Handle<Image>,
     #[texture(3)]
-    normal_view: Handle<Image>,
-    #[texture(4)]
     motion_view: Handle<Image>,
-    #[storage(5, read_only)]
+    #[storage(4, read_only)]
     sphere: Vec<GpuSphere>,
-    #[storage(6, read_only)]
+    #[storage(5, read_only)]
     light: Vec<Light>,
 }
 

@@ -10,12 +10,11 @@
 }
 
 @group(0) @binding(0) var<uniform> view: View;
-@group(0) @binding(1) var<uniform> globals: Globals;
-@group(0) @binding(2) var depth_prepass_texture: texture_depth_2d;
-@group(0) @binding(3) var normal_prepass_texture: texture_2d<f32>;
-@group(0) @binding(4) var motion_vector_prepass_texture: texture_2d<f32>;
-@group(0) @binding(5) var<storage> spheres: array<Sphere>;
-@group(0) @binding(6) var<storage> lights: array<Light>;
+@group(0) @binding(1) var previous: texture_storage_2d<rgba8unorm, read_write>;
+@group(0) @binding(2) var<uniform> globals: Globals;
+@group(0) @binding(3) var motion_vector_prepass_texture: texture_2d<f32>;
+@group(0) @binding(4) var<storage> spheres: array<Sphere>;
+@group(0) @binding(5) var<storage> lights: array<Light>;
 
 
 var<private> uv: vec2<f32>;
@@ -114,14 +113,12 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     uv = in.uv * vec2(2.0, -2.0) + vec2(-1.0, 1.0);
     var origin = view.world_position;
     var dir = normalize(view.inverse_view_proj * vec4(uv, 0.0, 1.0)).xyz;
-    let depth = textureLoad(depth_prepass_texture, vec2<i32>(in.position.xy), 0);
-    let normal = textureLoad(normal_prepass_texture, vec2<i32>(in.position.xy), 0).xyz * 2. - 1.;
     let motion_vector = textureLoad(motion_vector_prepass_texture, vec2<i32>(in.position.xy), 0);
 
     var col = vec3(1.0);
     var light = vec3(0.0);
     var ray = Ray(origin, dir);
-    for (var i = 0; i < 4; i++) {
+    for (var i = 0; i < 8; i++) {
         let record = hit_scene(ray);
         if record.hit {
             ray = Ray(record.point, rand_hemi(record.normal));
@@ -132,9 +129,14 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
             light += record.light * col;
             col *= record.color;
         } else {
-            light += vec3(0.02, 0.04, 0.1);
+            light += vec3(0.5, 0.8, 0.9) * col;
+            // light = ray.direction;
             break;
         }
     }
-    return vec4(light, 1.0);
+    let prev = textureLoad(previous, vec2<i32>(in.position.xy));
+    // let prev = vec4(0.0);
+    let out = (vec4(light, 1.0) + prev) / 2.0;
+    textureStore(previous, vec2<i32>(in.position.xy), out);
+    return out;
 }
