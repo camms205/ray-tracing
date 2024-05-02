@@ -10,11 +10,12 @@
 }
 
 @group(0) @binding(0) var<uniform> view: View;
-@group(0) @binding(1) var previous: texture_storage_2d<rgba8unorm, read_write>;
-@group(0) @binding(2) var<uniform> globals: Globals;
-@group(0) @binding(3) var motion_vector_prepass_texture: texture_2d<f32>;
-@group(0) @binding(4) var<storage> spheres: array<Sphere>;
-@group(0) @binding(5) var<storage> lights: array<Light>;
+@group(0) @binding(1) var<uniform> globals: Globals;
+@group(0) @binding(2) var motion_vector_prepass_texture: texture_2d<f32>;
+@group(1) @binding(0) var previous: texture_storage_2d<rgba8unorm, read_write>;
+@group(1) @binding(1) var<uniform> frame_count: u32;
+@group(1) @binding(2) var<storage> spheres: array<Sphere>;
+@group(1) @binding(3) var<storage> lights: array<Light>;
 
 
 var<private> uv: vec2<f32>;
@@ -129,14 +130,19 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
             light += record.light * col;
             col *= record.color;
         } else {
-            light += vec3(0.5, 0.8, 0.9) * col;
+            light += vec3(0.5, 0.5, 0.8) * col;
             // light = ray.direction;
             break;
         }
     }
     let prev = textureLoad(previous, vec2<i32>(in.position.xy));
-    // let prev = vec4(0.0);
-    let out = (vec4(light, 1.0) + prev) / 2.0;
+    var out = vec4(0.0);
+    // if globals.frame_count == frame_count {
+        out = vec4(light, 1.0);
+    // } else {
+    //     out = (vec4(light, 1.0)) / f32(globals.frame_count - frame_count) + prev;
+    // }
     textureStore(previous, vec2<i32>(in.position.xy), out);
     return out;
+    // return vec4(in.position.xy / 1000.0, 0.0, 1.0);
 }

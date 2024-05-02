@@ -1,5 +1,6 @@
 use bevy::{
     asset::load_internal_asset,
+    core::FrameCount,
     core_pipeline::{
         fullscreen_vertex_shader::fullscreen_shader_vertex_state,
         prepass::{node::PrepassNode, MotionVectorPrepass, ViewPrepassTextures},
@@ -9,23 +10,24 @@ use bevy::{
     prelude::*,
     render::{
         camera::{CameraRenderGraph, ExtractedCamera},
-        extract_component::{ExtractComponent, ExtractComponentPlugin},
         extract_resource::{ExtractResource, ExtractResourcePlugin},
         globals::{GlobalsBuffer, GlobalsUniform},
-        gpu_component_array_buffer::GpuComponentArrayBufferPlugin,
         render_asset::{RenderAssetUsages, RenderAssets},
         render_graph::{RenderGraphApp, RenderLabel, RenderSubGraph, ViewNode, ViewNodeRunner},
         render_resource::{
-            AsBindGroup, BindGroupEntries, BindGroupLayout, CachedRenderPipelineId,
-            ColorTargetState, ColorWrites, Extent3d, FragmentState, GpuArrayBuffer,
+            binding_types::{texture_2d, uniform_buffer},
+            AsBindGroup, BindGroupEntries, BindGroupLayout, BindGroupLayoutEntries,
+            CachedRenderPipelineId, ColorTargetState, ColorWrites, Extent3d, FragmentState,
             MultisampleState, PipelineCache, PrimitiveState, RenderPassDescriptor,
-            RenderPipelineDescriptor, ShaderType, TextureDimension, TextureFormat, TextureUsages,
+            RenderPipelineDescriptor, ShaderStages, ShaderType, TextureDimension, TextureFormat,
+            TextureUsages,
         },
         renderer::RenderDevice,
-        texture::BevyDefault,
-        view::{ViewTarget, ViewUniform, ViewUniforms},
+        texture::{BevyDefault, FallbackImage},
+        view::{ViewTarget, ViewUniform, ViewUniformOffset, ViewUniforms},
         RenderApp,
     },
+    window::WindowResized,
 };
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use ray_tracing::fly_cam::{FlyCam, NoCameraPlayerPlugin};
@@ -39,7 +41,7 @@ fn main() {
             RayTracingPlugin,
         ))
         .add_systems(Startup, setup)
-        .add_systems(Update, (close_on_q, update))
+        .add_systems(Update, (close_on_q, resize))
         .run();
 }
 
@@ -76,8 +78,53 @@ fn setup(
         RenderAssetUsages::default(),
     );
     image.texture_descriptor.usage = TextureUsages::STORAGE_BINDING;
-    let image = images.add(image);
-    commands.insert_resource(PreviousRender { image });
+    commands.insert_resource(RayTracingInfo {
+        previous: images.add(image),
+        sphere: vec![
+            GpuSphere::new(Vec3::ZERO, 1.0, Color::FUCHSIA, Vec3::ZERO),
+            GpuSphere::new(
+                Vec3::new(2.0, 0.0, -1.0),
+                1.0,
+                Color::Rgba {
+                    red: 0.2,
+                    green: 0.7,
+                    blue: 0.1,
+                    alpha: 1.0,
+                },
+                Vec3::ZERO,
+            ),
+            GpuSphere::new(
+                Vec3::new(0.0, -101.0, 0.0),
+                100.0,
+                Color::Rgba {
+                    red: 0.2,
+                    green: 0.3,
+                    blue: 6.0,
+                    alpha: 1.0,
+                },
+                Vec3::ZERO,
+            ),
+            GpuSphere::new(
+                Vec3::new(-50.0, 30.0, 50.0),
+                20.0,
+                Color::BLACK,
+                Vec3::new(1.0, 0.0, 0.0),
+            ),
+            GpuSphere::new(
+                Vec3::new(50.0, 30.0, -50.0),
+                20.0,
+                Color::BLACK,
+                Vec3::new(0.0, 1.0, 0.0),
+            ),
+            GpuSphere::new(
+                Vec3::new(-50.0, 30.0, -50.0),
+                20.0,
+                Color::BLACK,
+                Vec3::new(0.0, 0.0, 1.0),
+            ),
+        ],
+        ..Default::default()
+    });
     let material_black = materials.add(Color::BLACK);
     let material_red = materials.add(Color::RED);
     commands.spawn((
@@ -106,75 +153,29 @@ fn setup(
         transform: Transform::from_xyz(1., 0.5, 1.),
         ..default()
     });
-    commands.spawn(GpuSphere::new(Vec3::ZERO, 1.0, Color::FUCHSIA, Vec3::ZERO));
-    commands.spawn(GpuSphere::new(
-        Vec3::new(2.0, 0.0, -1.0),
-        1.0,
-        Color::Rgba {
-            red: 0.2,
-            green: 0.7,
-            blue: 0.1,
-            alpha: 1.0,
-        },
-        Vec3::ZERO,
-    ));
-    commands.spawn(GpuSphere::new(
-        Vec3::new(0.0, -101.0, 0.0),
-        100.0,
-        Color::Rgba {
-            red: 0.2,
-            green: 0.3,
-            blue: 6.0,
-            alpha: 1.0,
-        },
-        Vec3::ZERO,
-    ));
-    commands.spawn(GpuSphere::new(
-        Vec3::new(-50.0, 30.0, 50.0),
-        20.0,
-        Color::BLACK,
-        Vec3::new(1.0, 0.0, 0.0),
-    ));
-    commands.spawn(GpuSphere::new(
-        Vec3::new(50.0, 30.0, -50.0),
-        20.0,
-        Color::BLACK,
-        Vec3::new(0.0, 1.0, 0.0),
-    ));
-    commands.spawn(GpuSphere::new(
-        Vec3::new(-50.0, 30.0, -50.0),
-        20.0,
-        Color::BLACK,
-        Vec3::new(0.0, 0.0, 1.0),
-    ));
-    commands.spawn(GpuSphere::new(
-        Vec3::new(0.0, 50.0, 0.0),
-        20.0,
-        Color::BLACK,
-        Vec3::new(1.0, 1.0, 1.0),
-    ));
     // commands.spawn(Light::new(Vec3::new(-50.0, 30.0, 50.0), Color::RED, 1.0));
     // commands.spawn(Light::new(Vec3::new(50.0, 30.0, -50.0), Color::GREEN, 1.0));
     // commands.spawn(Light::new(Vec3::new(-50.0, 30.0, -50.0), Color::BLUE, 1.0));
     // commands.spawn(Light::new(Vec3::new(0.0, 50.0, 0.0), Color::WHITE, 1.0));
 }
 
-fn update(
-    window: Query<&Window>,
-    previous: Res<PreviousRender>,
+fn resize(
+    mut info: ResMut<RayTracingInfo>,
     mut images: ResMut<Assets<Image>>,
+    mut resize_reader: EventReader<WindowResized>,
+    frame_count: Res<FrameCount>,
 ) {
-    let window = window.single();
-    let (width, height) = (
-        window.resolution.physical_width(),
-        window.resolution.physical_height(),
-    );
-    let image = images.get_mut(&previous.image).unwrap();
-    image.resize(bevy::render::render_resource::Extent3d {
-        width,
-        height,
-        depth_or_array_layers: 1,
-    });
+    for e in resize_reader.read() {
+        info.count = frame_count.0;
+        let width = e.width as u32;
+        let height = e.height as u32;
+        let image = images.get_mut(&info.previous).unwrap();
+        image.resize(bevy::render::render_resource::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        });
+    }
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
@@ -192,11 +193,6 @@ struct RayTracingGraph;
 const RAY_TRACING_UTILS_HANDLE: Handle<Shader> =
     Handle::weak_from_u128(199877112663398275092447563180262563067);
 
-#[derive(Resource, Default, ExtractResource, Clone)]
-struct PreviousRender {
-    image: Handle<Image>,
-}
-
 struct RayTracingPlugin;
 impl Plugin for RayTracingPlugin {
     fn build(&self, app: &mut App) {
@@ -207,13 +203,10 @@ impl Plugin for RayTracingPlugin {
             Shader::from_wgsl
         );
         app.insert_resource(Msaa::Off)
-            .add_plugins(GpuComponentArrayBufferPlugin::<GpuSphere>::default())
-            .add_plugins(GpuComponentArrayBufferPlugin::<Light>::default())
-            .add_plugins(ExtractComponentPlugin::<GpuSphere>::default())
-            .add_plugins(ExtractComponentPlugin::<Light>::default())
-            .add_plugins(ExtractResourcePlugin::<PreviousRender>::default())
+            .add_plugins(ExtractResourcePlugin::<RayTracingInfo>::default())
             .register_type::<Light>()
-            .register_type::<GpuSphere>();
+            .register_type::<GpuSphere>()
+            .register_type::<RayTracingInfo>();
         let render_app = app.get_sub_app_mut(RenderApp).unwrap();
         render_app
             .add_render_sub_graph(RayTracingGraph)
@@ -239,48 +232,42 @@ impl ViewNode for RayTracingPassNode {
         &'static ExtractedCamera,
         &'static ViewTarget,
         &'static ViewPrepassTextures,
+        &'static ViewUniformOffset,
     );
 
     fn run(
         &self,
         _graph: &mut bevy::render::render_graph::RenderGraphContext,
         render_context: &mut bevy::render::renderer::RenderContext,
-        (camera, target, view_prepass_textures): QueryItem<Self::ViewQuery>,
+        (camera, target, view_prepass_textures, view_uniform_offset): QueryItem<Self::ViewQuery>,
         world: &World,
     ) -> Result<(), bevy::render::render_graph::NodeRunError> {
+        let render_device = render_context.render_device();
         let view_uniforms = &world.resource::<ViewUniforms>().uniforms;
-        let view_uniforms = view_uniforms.binding().unwrap();
         let globals_uniform = world.resource::<GlobalsBuffer>().buffer.binding().unwrap();
         let motion = view_prepass_textures.motion_vectors_view().unwrap();
-        let previous = &world
-            .resource::<RenderAssets<Image>>()
-            .get(&world.resource::<PreviousRender>().image)
-            .unwrap()
-            .texture_view;
-
         let ray_tracing_pipeline = world.resource::<RayTracingPipeline>();
+        let ray_tracing_info = world.resource::<RayTracingInfo>();
+        let bind_group = ray_tracing_info
+            .as_bind_group(
+                &RayTracingInfo::bind_group_layout(render_device),
+                render_device,
+                world.resource::<RenderAssets<Image>>(),
+                world.resource::<FallbackImage>(),
+            )
+            .unwrap()
+            .bind_group;
+
         let pipeline_cache = world.resource::<PipelineCache>();
         let Some(pipeline) = pipeline_cache.get_render_pipeline(ray_tracing_pipeline.pipeline_id)
         else {
             return Ok(());
         };
 
-        let render_device = render_context.render_device();
-
-        let spheres = world.get_resource::<GpuArrayBuffer<GpuSphere>>().unwrap();
-        let lights = world.get_resource::<GpuArrayBuffer<Light>>().unwrap();
-
-        let bind_group = render_device.create_bind_group(
+        let global_bind_group = render_device.create_bind_group(
             "ray_tracing_bind_group",
             &ray_tracing_pipeline.layout,
-            &BindGroupEntries::sequential((
-                view_uniforms,
-                previous,
-                globals_uniform,
-                motion,
-                spheres.binding().unwrap(),
-                lights.binding().unwrap(),
-            )),
+            &BindGroupEntries::sequential((view_uniforms, globals_uniform, motion)),
         );
         let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
             label: Some("main_opaque_pass_3d"),
@@ -294,7 +281,8 @@ impl ViewNode for RayTracingPassNode {
             render_pass.set_camera_viewport(viewport);
         }
         render_pass.set_render_pipeline(pipeline);
-        render_pass.set_bind_group(0, &bind_group, &[]);
+        render_pass.set_bind_group(0, &global_bind_group, &[view_uniform_offset.offset]);
+        render_pass.set_bind_group(1, &bind_group, &[]);
         render_pass.draw(0..3, 0..1);
         Ok(())
     }
@@ -306,7 +294,7 @@ struct RayTracingPipeline {
     pipeline_id: CachedRenderPipelineId,
 }
 
-#[derive(Component, ExtractComponent, Reflect, Default, Debug, Clone, ShaderType)]
+#[derive(Reflect, Default, Debug, Clone, ShaderType)]
 struct Light {
     position: Vec3,
     color: Color,
@@ -323,7 +311,7 @@ impl Light {
     }
 }
 
-#[derive(Component, ExtractComponent, Reflect, Default, Debug, Clone, ShaderType)]
+#[derive(Reflect, Default, Debug, Clone, ShaderType)]
 struct GpuSphere {
     center: Vec3,
     radius: f32,
@@ -342,19 +330,22 @@ impl GpuSphere {
     }
 }
 
-#[derive(Resource, Clone, ExtractResource, AsBindGroup)]
+#[derive(Reflect, Clone, Resource, ExtractResource, AsBindGroup, Default)]
 struct RayTracingInfo {
-    #[uniform(0)]
-    view_uniform: ViewUniform,
-    #[storage_texture(1, visibility(fragment))]
+    // #[uniform(0)]
+    // view_uniform: ViewUniform,
+    #[storage_texture(0, visibility(fragment))]
+    #[reflect(ignore)]
     previous: Handle<Image>,
-    #[uniform(2)]
-    globals: GlobalsUniform,
-    #[texture(3)]
-    motion_view: Handle<Image>,
-    #[storage(4, read_only)]
+    #[uniform(1)]
+    count: u32,
+    // #[uniform(3)]
+    // globals: GlobalsUniform,
+    // #[texture(2)]
+    // motion_view: Handle<Image>,
+    #[storage(2, read_only)]
     sphere: Vec<GpuSphere>,
-    #[storage(5, read_only)]
+    #[storage(3, read_only)]
     light: Vec<Light>,
 }
 
@@ -365,12 +356,25 @@ impl FromWorld for RayTracingPipeline {
         let shader = world
             .resource::<AssetServer>()
             .load("shaders/ray_tracing.wgsl");
+        let global_layout = render_device.create_bind_group_layout(
+            "gloabl_bind_group_layout",
+            &BindGroupLayoutEntries::sequential(
+                ShaderStages::FRAGMENT,
+                (
+                    uniform_buffer::<ViewUniform>(true),
+                    uniform_buffer::<GlobalsUniform>(false),
+                    texture_2d(bevy::render::render_resource::TextureSampleType::Float {
+                        filterable: true,
+                    }),
+                ),
+            ),
+        );
         let pipeline_id =
             world
                 .resource_mut::<PipelineCache>()
                 .queue_render_pipeline(RenderPipelineDescriptor {
                     label: Some("ray_tracing_pipeline".into()),
-                    layout: vec![layout.clone()],
+                    layout: vec![global_layout.clone(), layout.clone()],
                     vertex: fullscreen_shader_vertex_state(),
                     fragment: Some(FragmentState {
                         shader,
@@ -388,7 +392,7 @@ impl FromWorld for RayTracingPipeline {
                     multisample: MultisampleState::default(),
                 });
         Self {
-            layout,
+            layout: global_layout,
             pipeline_id,
         }
     }
