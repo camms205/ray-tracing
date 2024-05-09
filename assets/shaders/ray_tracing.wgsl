@@ -137,12 +137,11 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     }
     let prev = textureLoad(previous, vec2<i32>(in.position.xy));
     var out = vec4(0.0);
-    // if globals.frame_count == frame_count {
+    if globals.frame_count == frame_count {
         out = vec4(light, 1.0);
-    // } else {
-    //     out = (vec4(light, 1.0)) / f32(globals.frame_count - frame_count) + prev;
-    // }
+    } else {
+        out = (vec4(light, 1.0)) / f32(globals.frame_count - frame_count) + prev;
+    }
     textureStore(previous, vec2<i32>(in.position.xy), out);
     return out;
-    // return vec4(in.position.xy / 1000.0, 0.0, 1.0);
 }

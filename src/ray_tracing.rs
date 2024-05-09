@@ -3,12 +3,11 @@ use bevy::{
     core_pipeline::{
         fullscreen_vertex_shader::fullscreen_shader_vertex_state,
         prepass::{node::PrepassNode, ViewPrepassTextures},
-        upscaling::UpscalingNode,
     },
     ecs::query::QueryItem,
     prelude::*,
     render::{
-        camera::ExtractedCamera,
+        camera::{CameraOutputMode, ExtractedCamera},
         extract_resource::{ExtractResource, ExtractResourcePlugin},
         globals::{GlobalsBuffer, GlobalsUniform},
         render_asset::RenderAssets,
@@ -17,29 +16,27 @@ use bevy::{
             binding_types::{texture_2d, uniform_buffer},
             AsBindGroup, BindGroupEntries, BindGroupLayout, BindGroupLayoutEntries,
             CachedRenderPipelineId, ColorTargetState, ColorWrites, FragmentState, MultisampleState,
-            PipelineCache, PrimitiveState, RenderPassDescriptor, RenderPipelineDescriptor,
-            ShaderStages, ShaderType, TextureFormat,
+            Operations, PipelineCache, PrimitiveState, RenderPassColorAttachment,
+            RenderPassDescriptor, RenderPipelineDescriptor, ShaderStages, ShaderType, StoreOp,
+            TextureFormat,
         },
         renderer::RenderDevice,
-        texture::{BevyDefault, FallbackImage},
+        texture::FallbackImage,
         view::{ViewTarget, ViewUniform, ViewUniformOffset, ViewUniforms},
         RenderApp,
     },
 };
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
-pub struct PrepassLabel;
+struct PrepassLabel;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
-pub struct UpscaleLabel;
-
-#[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
-pub struct RayTracingLabel;
+struct RayTracingLabel;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderSubGraph)]
 pub struct RayTracingGraph;
 
-pub const RAY_TRACING_UTILS_HANDLE: Handle<Shader> =
+const RAY_TRACING_UTILS_HANDLE: Handle<Shader> =
     Handle::weak_from_u128(199877112663398275092447563180262563067);
 
 pub struct RayTracingPlugin;
@@ -63,10 +60,6 @@ impl Plugin for RayTracingPlugin {
                 .add_render_graph_node::<ViewNodeRunner<RayTracingPassNode>>(
                     RayTracingGraph,
                     RayTracingLabel,
-                )
-                .add_render_graph_node::<ViewNodeRunner<UpscalingNode>>(
-                    RayTracingGraph,
-                    UpscaleLabel,
                 );
         }
     }
@@ -79,7 +72,7 @@ impl Plugin for RayTracingPlugin {
 }
 
 #[derive(Default)]
-pub struct RayTracingPassNode;
+struct RayTracingPassNode;
 
 impl ViewNode for RayTracingPassNode {
     type ViewQuery = (
@@ -123,9 +116,23 @@ impl ViewNode for RayTracingPassNode {
             &ray_tracing_pipeline.layout,
             &BindGroupEntries::sequential((view_uniforms, globals_uniform, motion)),
         );
+        let color_attachment_load_op = match camera.output_mode {
+            CameraOutputMode::Write {
+                color_attachment_load_op,
+                ..
+            } => color_attachment_load_op,
+            CameraOutputMode::Skip => return Ok(()),
+        };
         let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
-            label: Some("main_opaque_pass_3d"),
-            color_attachments: &[Some(target.get_color_attachment())],
+            label: Some("ray_tracing_render_pass"),
+            color_attachments: &[Some(RenderPassColorAttachment {
+                view: target.out_texture(),
+                resolve_target: None,
+                ops: Operations {
+                    load: color_attachment_load_op,
+                    store: StoreOp::Store,
+                },
+            })],
             depth_stencil_attachment: None,
             timestamp_writes: None,
             occlusion_query_set: None,
@@ -143,9 +150,9 @@ impl ViewNode for RayTracingPassNode {
 }
 
 #[derive(Resource)]
-pub struct RayTracingPipeline {
-    pub layout: BindGroupLayout,
-    pub pipeline_id: CachedRenderPipelineId,
+struct RayTracingPipeline {
+    layout: BindGroupLayout,
+    pipeline_id: CachedRenderPipelineId,
 }
 
 #[derive(Reflect, Default, Debug, Clone, ShaderType)]
@@ -169,17 +176,11 @@ impl GpuSphere {
 
 #[derive(Reflect, Clone, Resource, ExtractResource, AsBindGroup, Default)]
 pub struct RayTracingInfo {
-    // #[uniform(0)]
-    // view_uniform: ViewUniform,
     #[storage_texture(0, visibility(fragment))]
     #[reflect(ignore)]
     pub previous: Handle<Image>,
     #[uniform(1)]
     pub count: u32,
-    // #[uniform(3)]
-    // globals: GlobalsUniform,
-    // #[texture(2)]
-    // motion_view: Handle<Image>,
     #[storage(2, read_only)]
     pub sphere: Vec<GpuSphere>,
 }
@@ -216,7 +217,8 @@ impl FromWorld for RayTracingPipeline {
                         shader_defs: vec![],
                         entry_point: "fragment".into(),
                         targets: vec![Some(ColorTargetState {
-                            format: TextureFormat::bevy_default(),
+                            // format: TextureFormat::bevy_default(),
+                            format: TextureFormat::Bgra8UnormSrgb,
                             blend: None,
                             write_mask: ColorWrites::ALL,
                         })],
