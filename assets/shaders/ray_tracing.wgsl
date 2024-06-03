@@ -12,7 +12,6 @@
 @group(0) @binding(0) var<uniform> view: View;
 @group(0) @binding(1) var<uniform> globals: Globals;
 @group(0) @binding(2) var motion_vector_prepass_texture: texture_2d<f32>;
-@group(1) @binding(0) var previous: texture_storage_2d<rgba8unorm, read_write>;
 @group(1) @binding(1) var<uniform> frame_count: u32;
 @group(1) @binding(2) var<storage> spheres: array<Sphere>;
 @group(1) @binding(3) var<storage> lights: array<Light>;
@@ -116,32 +115,27 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     var dir = normalize(view.inverse_view_proj * vec4(uv, 0.0, 1.0)).xyz;
     let motion_vector = textureLoad(motion_vector_prepass_texture, vec2<i32>(in.position.xy), 0);
 
-    var col = vec3(1.0);
+    let samples = 8;
     var light = vec3(0.0);
-    var ray = Ray(origin, dir);
-    for (var i = 0; i < 8; i++) {
-        let record = hit_scene(ray);
-        if record.hit {
-            ray = Ray(record.point, rand_hemi(record.normal));
-            // var light = sample_lights();
-            // col += light.col.rgb;
-            // let l = normalize(light.pos - record.point);
-            // col *= record.color * dot(record.normal, l);
-            light += record.light * col;
-            col *= record.color;
-        } else {
-            light += vec3(0.5, 0.5, 0.8) * col;
-            // light = ray.direction;
-            break;
+    for (var j = 0; j < samples; j++) {
+        var col = vec3(1.0);
+        var ray = Ray(origin, dir + vec3(rand(), rand(), 0.0) * 0.0015);
+        for (var i = 0; i < 4; i++) {
+            let record = hit_scene(ray);
+            if record.hit {
+                ray = Ray(record.point, rand_hemi(record.normal));
+                // var light = sample_lights();
+                // col += light.col.rgb;
+                // let l = normalize(light.pos - record.point);
+                // col *= record.color * dot(record.normal, l);
+                light += record.light * col;
+                col *= record.color;
+            } else {
+                light += vec3(0.5, 0.71, 0.86) * col;
+                // light = ray.direction;
+                break;
+            }
         }
     }
-    let prev = textureLoad(previous, vec2<i32>(in.position.xy));
-    var out = vec4(0.0);
-    if globals.frame_count == frame_count {
-        out = vec4(light, 1.0);
-    } else {
-        out = (vec4(light, 1.0)) / f32(globals.frame_count - frame_count) + prev;
-    }
-    textureStore(previous, vec2<i32>(in.position.xy), out);
-    return out;
+    return vec4(light / f32(samples), 1.0);
 }

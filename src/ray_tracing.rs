@@ -26,6 +26,7 @@ use bevy::{
         RenderApp,
     },
 };
+use bevy_inspector_egui::quick::ResourceInspectorPlugin;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
 struct PrepassLabel;
@@ -51,6 +52,7 @@ impl Plugin for RayTracingPlugin {
         );
         app.insert_resource(Msaa::Off)
             .add_plugins(ExtractResourcePlugin::<RayTracingInfo>::default())
+            .add_plugins(ResourceInspectorPlugin::<RayTracingInfo>::default())
             .register_type::<GpuSphere>()
             .register_type::<RayTracingInfo>();
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
@@ -176,9 +178,6 @@ impl GpuSphere {
 
 #[derive(Reflect, Clone, Resource, ExtractResource, AsBindGroup, Default)]
 pub struct RayTracingInfo {
-    #[storage_texture(0, visibility(fragment))]
-    #[reflect(ignore)]
-    pub previous: Handle<Image>,
     #[uniform(1)]
     pub count: u32,
     #[storage(2, read_only)]

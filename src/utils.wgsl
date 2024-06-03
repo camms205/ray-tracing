@@ -4,7 +4,7 @@
 
 var<private> random_seed: f32 = 1.0;
 fn rand(uv: vec2<f32>, globals: Globals) -> f32 {
-    let val = fract(sin(dot(uv, vec2(12.9898, 78.233)) + globals.time) * 43758.5453123  + random_seed);
+    let val = fract(sin(dot(uv, vec2(12.9898, 78.233))) * 43758.5453123 + random_seed);
     random_seed = val;
     return val;
 }

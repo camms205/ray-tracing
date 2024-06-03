@@ -1,5 +1,4 @@
 use bevy::{
-    core::FrameCount,
     core_pipeline::prepass::MotionVectorPrepass,
     prelude::*,
     render::{
@@ -7,7 +6,6 @@ use bevy::{
         render_asset::RenderAssetUsages,
         render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages},
     },
-    window::WindowResized,
 };
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use ray_tracing::{
@@ -17,14 +15,9 @@ use ray_tracing::{
 
 fn main() {
     App::new()
-        .add_plugins((
-            DefaultPlugins,
-            WorldInspectorPlugin::default(),
-            NoCameraPlayerPlugin,
-            RayTracingPlugin,
-        ))
+        .add_plugins((DefaultPlugins, NoCameraPlayerPlugin, RayTracingPlugin))
         .add_systems(Startup, setup)
-        .add_systems(Update, (close_on_q, resize))
+        .add_systems(Update, close_on_q)
         .run();
 }
 
@@ -47,7 +40,6 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut images: ResMut<Assets<Image>>,
 ) {
     let mut image = Image::new_fill(
         Extent3d {
@@ -62,7 +54,6 @@ fn setup(
     );
     image.texture_descriptor.usage = TextureUsages::STORAGE_BINDING;
     commands.insert_resource(RayTracingInfo {
-        previous: images.add(image),
         sphere: vec![
             GpuSphere::new(Vec3::ZERO, 1.0, Color::FUCHSIA, Vec3::ZERO),
             GpuSphere::new(
@@ -87,24 +78,24 @@ fn setup(
                 },
                 Vec3::ZERO,
             ),
-            GpuSphere::new(
-                Vec3::new(-50.0, 30.0, 50.0),
-                20.0,
-                Color::BLACK,
-                Vec3::new(1.0, 0.0, 0.0),
-            ),
-            GpuSphere::new(
-                Vec3::new(50.0, 30.0, -50.0),
-                20.0,
-                Color::BLACK,
-                Vec3::new(0.0, 1.0, 0.0),
-            ),
-            GpuSphere::new(
-                Vec3::new(-50.0, 30.0, -50.0),
-                20.0,
-                Color::BLACK,
-                Vec3::new(0.0, 0.0, 1.0),
-            ),
+            // GpuSphere::new(
+            //     Vec3::new(-50.0, 30.0, 50.0),
+            //     20.0,
+            //     Color::BLACK,
+            //     Vec3::new(1.0, 0.0, 0.0),
+            // ),
+            // GpuSphere::new(
+            //     Vec3::new(50.0, 30.0, -50.0),
+            //     20.0,
+            //     Color::BLACK,
+            //     Vec3::new(0.0, 1.0, 0.0),
+            // ),
+            // GpuSphere::new(
+            //     Vec3::new(-50.0, 30.0, -50.0),
+            //     20.0,
+            //     Color::BLACK,
+            //     Vec3::new(0.0, 0.0, 1.0),
+            // ),
         ],
         ..Default::default()
     });
@@ -172,23 +163,4 @@ fn setup(
         },
         ..Default::default()
     });
-}
-
-fn resize(
-    mut info: ResMut<RayTracingInfo>,
-    mut images: ResMut<Assets<Image>>,
-    mut resize_reader: EventReader<WindowResized>,
-    frame_count: Res<FrameCount>,
-) {
-    for e in resize_reader.read() {
-        info.count = frame_count.0;
-        let width = e.width as u32;
-        let height = e.height as u32;
-        let image = images.get_mut(&info.previous).unwrap();
-        image.resize(bevy::render::render_resource::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        });
-    }
 }
