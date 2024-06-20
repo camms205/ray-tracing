@@ -1,5 +1,5 @@
 use bevy::{
-    core_pipeline::prepass::MotionVectorPrepass,
+    core_pipeline::{core_3d::graph::Core3d, prepass::MotionVectorPrepass},
     prelude::*,
     render::{
         camera::CameraRenderGraph,
@@ -16,8 +16,7 @@ fn main() {
     App::new()
         .add_plugins((DefaultPlugins, NoCameraPlayerPlugin, RayTracingPlugin))
         .add_systems(Startup, setup)
-        .add_systems(Update, close_on_q)
-        .add_systems(Update, rotate)
+        .add_systems(Update, (close_on_q, change_render_graph, rotate))
         .run();
 }
 
@@ -36,23 +35,19 @@ fn close_on_q(
         }
     }
 }
+
+#[derive(Component, Default)]
+enum Rendering {
+    Core3d,
+    #[default]
+    RayTracing,
+}
+
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let mut image = Image::new_fill(
-        Extent3d {
-            width: 1,
-            height: 1,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        &[0u8; 4],
-        TextureFormat::Rgba8Unorm,
-        RenderAssetUsages::default(),
-    );
-    image.texture_descriptor.usage = TextureUsages::STORAGE_BINDING;
     commands.insert_resource(RayTracingInfo {
         ..Default::default()
     });
@@ -91,33 +86,6 @@ fn setup(
         ..default()
     });
     commands.spawn(PointLightBundle {
-        transform: Transform::from_xyz(-50.0, 30.0, 50.0),
-        point_light: PointLight {
-            color: Color::srgb(1.0, 0.0, 0.0),
-            radius: 1.0,
-            ..Default::default()
-        },
-        ..Default::default()
-    });
-    commands.spawn(PointLightBundle {
-        transform: Transform::from_xyz(50.0, 30.0, -50.0),
-        point_light: PointLight {
-            color: Color::srgb(0.0, 1.0, 0.0),
-            radius: 1.0,
-            ..Default::default()
-        },
-        ..Default::default()
-    });
-    commands.spawn(PointLightBundle {
-        transform: Transform::from_xyz(-50.0, 30.0, -50.0),
-        point_light: PointLight {
-            color: Color::srgb(0.0, 0.0, 1.0),
-            radius: 1.0,
-            ..Default::default()
-        },
-        ..Default::default()
-    });
-    commands.spawn(PointLightBundle {
         transform: Transform::from_xyz(0.0, 50.0, 0.0),
         point_light: PointLight {
             color: Color::WHITE,
@@ -131,8 +99,29 @@ fn setup(
 #[derive(Component)]
 struct Rotate;
 
-fn rotate(mut rotate: Query<&mut Transform, With<Rotate>>) {
+fn rotate(mut rotate: Query<&mut Transform, With<Rotate>>, time: Res<Time>) {
     for mut ele in rotate.iter_mut() {
-        ele.rotate_y(0.1);
+        ele.rotate_y(1f32 * time.delta_seconds());
+    }
+}
+
+fn change_render_graph(
+    mut rendering: Local<Rendering>,
+    mut query: Query<(&mut CameraRenderGraph)>,
+    input: Res<ButtonInput<KeyCode>>,
+) {
+    let mut render_graph = query.single_mut();
+
+    if input.just_pressed(KeyCode::Tab) {
+        match *rendering {
+            Rendering::Core3d => {
+                render_graph.set(RayTracingGraph);
+                *rendering = Rendering::RayTracing
+            }
+            Rendering::RayTracing => {
+                render_graph.set(Core3d);
+                *rendering = Rendering::Core3d
+            }
+        }
     }
 }

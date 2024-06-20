@@ -263,7 +263,7 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let record = hit_triangles(Ray(origin, dir));
     // let record = ray_triangle(Ray(origin, dir), triangles[0]);
     if record.hit {
-        return vec4((record.normal * 0.5 + 0.5 )/ record.t, 1.0);
+        return vec4((record.normal * 0.5 + 0.5 ), 1.0);
     } else {
         return vec4(0.0);
     }

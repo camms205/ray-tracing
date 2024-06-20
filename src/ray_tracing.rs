@@ -51,7 +51,7 @@ impl Plugin for RayTracingPlugin {
         app.insert_resource(Msaa::Off)
             .add_plugins(ExtractResourcePlugin::<RayTracingInfo>::default())
             .register_type::<GpuSphere>()
-            .add_systems(PostStartup, prepare_meshinfo)
+            .add_systems(Update, prepare_meshinfo)
             .register_type::<RayTracingInfo>();
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
@@ -186,12 +186,14 @@ pub struct RayTracingInfo {
 }
 
 pub fn prepare_meshinfo(
-    mesh_handles: Query<&Handle<Mesh>>,
+    mesh_handles: Query<(&Handle<Mesh>, &GlobalTransform)>,
     meshes: Res<Assets<Mesh>>,
     mut ray_tracing_info: ResMut<RayTracingInfo>,
 ) {
-    for handle in mesh_handles.iter() {
-        let mesh = meshes.get(handle).unwrap();
+    let mut triangles = vec![];
+    let mut mesh_info = vec![];
+    for (handle, transform) in mesh_handles.iter() {
+        let mesh: &Mesh = meshes.get(handle).unwrap();
         let (Some(pos), Some(norm)) = (
             mesh.attribute(Mesh::ATTRIBUTE_POSITION),
             mesh.attribute(Mesh::ATTRIBUTE_NORMAL),
@@ -199,12 +201,22 @@ pub fn prepare_meshinfo(
             println!("Mesh missing attribute");
             continue;
         };
-        let pos: Vec<&[f32; 3]> = pos.as_float3().unwrap().iter().collect();
-        let norm: Vec<&[f32; 3]> = norm.as_float3().unwrap().iter().collect();
+        let pos: Vec<Vec3> = pos
+            .as_float3()
+            .unwrap()
+            .iter()
+            .map(|f| transform.transform_point(f.to_owned().into()))
+            .collect();
+        let norm: Vec<Vec3> = norm
+            .as_float3()
+            .unwrap()
+            .iter()
+            .map(|f| transform.transform_point(f.to_owned().into()))
+            .collect();
         let len = mesh.indices().unwrap().len();
         let indices: Vec<usize> = mesh.indices().unwrap().iter().collect();
         let triangle_len = ray_tracing_info.triangles.len();
-        ray_tracing_info.meshes.push(MeshInfo {
+        mesh_info.push(MeshInfo {
             first_tri: triangle_len as u32,
             tri_count: len as u32 / 3,
         });
@@ -213,20 +225,14 @@ pub fn prepare_meshinfo(
             let b = indices[i + 1];
             let c = indices[i + 2];
             let tri = Triangle {
-                pos: [
-                    pos[a].to_owned().into(),
-                    pos[b].to_owned().into(),
-                    pos[c].to_owned().into(),
-                ],
-                norm: [
-                    norm[a].to_owned().into(),
-                    norm[b].to_owned().into(),
-                    norm[c].to_owned().into(),
-                ],
+                pos: [pos[a], pos[b], pos[c]],
+                norm: [norm[a], norm[b], norm[c]],
             };
-            ray_tracing_info.triangles.push(tri);
+            triangles.push(tri);
         }
     }
+    ray_tracing_info.triangles = triangles;
+    ray_tracing_info.meshes = mesh_info;
 }
 
 impl FromWorld for RayTracingPipeline {
