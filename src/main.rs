@@ -1,11 +1,7 @@
 use bevy::{
     core_pipeline::{core_3d::graph::Core3d, prepass::MotionVectorPrepass},
     prelude::*,
-    render::{
-        camera::CameraRenderGraph,
-        render_asset::RenderAssetUsages,
-        render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages},
-    },
+    render::camera::CameraRenderGraph,
 };
 use ray_tracing::{
     fly_cam::{FlyCam, NoCameraPlayerPlugin},
@@ -107,7 +103,7 @@ fn rotate(mut rotate: Query<&mut Transform, With<Rotate>>, time: Res<Time>) {
 
 fn change_render_graph(
     mut rendering: Local<Rendering>,
-    mut query: Query<(&mut CameraRenderGraph)>,
+    mut query: Query<&mut CameraRenderGraph>,
     input: Res<ButtonInput<KeyCode>>,
 ) {
     let mut render_graph = query.single_mut();
