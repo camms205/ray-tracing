@@ -7,7 +7,7 @@ use bevy::{
     ecs::query::QueryItem,
     prelude::*,
     render::{
-        camera::{CameraOutputMode, ExtractedCamera},
+        camera::ExtractedCamera,
         extract_resource::{ExtractResource, ExtractResourcePlugin},
         globals::{GlobalsBuffer, GlobalsUniform},
         render_asset::RenderAssets,
@@ -16,17 +16,15 @@ use bevy::{
             binding_types::{texture_2d, uniform_buffer},
             AsBindGroup, BindGroupEntries, BindGroupLayout, BindGroupLayoutEntries,
             CachedRenderPipelineId, ColorTargetState, ColorWrites, FragmentState, MultisampleState,
-            Operations, PipelineCache, PrimitiveState, RenderPassColorAttachment,
-            RenderPassDescriptor, RenderPipelineDescriptor, ShaderStages, ShaderType, StoreOp,
-            TextureFormat,
+            PipelineCache, PrimitiveState, RenderPassDescriptor, RenderPipelineDescriptor,
+            ShaderStages, ShaderType, TextureFormat,
         },
         renderer::RenderDevice,
-        texture::FallbackImage,
+        texture::{FallbackImage, GpuImage},
         view::{ViewTarget, ViewUniform, ViewUniformOffset, ViewUniforms},
         RenderApp,
     },
 };
-use bevy_inspector_egui::quick::ResourceInspectorPlugin;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
 struct PrepassLabel;
@@ -52,10 +50,10 @@ impl Plugin for RayTracingPlugin {
         );
         app.insert_resource(Msaa::Off)
             .add_plugins(ExtractResourcePlugin::<RayTracingInfo>::default())
-            .add_plugins(ResourceInspectorPlugin::<RayTracingInfo>::default())
             .register_type::<GpuSphere>()
+            .add_systems(PostStartup, prepare_meshinfo)
             .register_type::<RayTracingInfo>();
-        if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
+        if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .add_render_sub_graph(RayTracingGraph)
                 .add_render_graph_node::<ViewNodeRunner<PrepassNode>>(RayTracingGraph, PrepassLabel)
@@ -101,7 +99,7 @@ impl ViewNode for RayTracingPassNode {
             .as_bind_group(
                 &RayTracingInfo::bind_group_layout(render_device),
                 render_device,
-                world.resource::<RenderAssets<Image>>(),
+                world.resource::<RenderAssets<GpuImage>>(),
                 world.resource::<FallbackImage>(),
             )
             .unwrap()
@@ -118,23 +116,9 @@ impl ViewNode for RayTracingPassNode {
             &ray_tracing_pipeline.layout,
             &BindGroupEntries::sequential((view_uniforms, globals_uniform, motion)),
         );
-        let color_attachment_load_op = match camera.output_mode {
-            CameraOutputMode::Write {
-                color_attachment_load_op,
-                ..
-            } => color_attachment_load_op,
-            CameraOutputMode::Skip => return Ok(()),
-        };
         let mut render_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
             label: Some("ray_tracing_render_pass"),
-            color_attachments: &[Some(RenderPassColorAttachment {
-                view: target.out_texture(),
-                resolve_target: None,
-                ops: Operations {
-                    load: color_attachment_load_op,
-                    store: StoreOp::Store,
-                },
-            })],
+            color_attachments: &[Some(target.out_texture_color_attachment(None))],
             depth_stencil_attachment: None,
             timestamp_writes: None,
             occlusion_query_set: None,
@@ -161,12 +145,12 @@ struct RayTracingPipeline {
 pub struct GpuSphere {
     pub center: Vec3,
     pub radius: f32,
-    pub color: Color,
+    pub color: LinearRgba,
     pub light: Vec3,
 }
 
 impl GpuSphere {
-    pub fn new(center: Vec3, radius: f32, color: Color, light: Vec3) -> GpuSphere {
+    pub fn new(center: Vec3, radius: f32, color: LinearRgba, light: Vec3) -> GpuSphere {
         Self {
             center,
             radius,
@@ -176,12 +160,73 @@ impl GpuSphere {
     }
 }
 
+#[derive(Reflect, Default, Debug, Clone, ShaderType)]
+pub struct Triangle {
+    pos: [Vec3; 3],
+    norm: [Vec3; 3],
+}
+
+#[derive(Reflect, Default, Debug, Clone, ShaderType)]
+pub struct MeshInfo {
+    first_tri: u32,
+    tri_count: u32,
+}
+
 #[derive(Reflect, Clone, Resource, ExtractResource, AsBindGroup, Default)]
+#[reflect(Resource)]
 pub struct RayTracingInfo {
     #[uniform(1)]
     pub count: u32,
     #[storage(2, read_only)]
-    pub sphere: Vec<GpuSphere>,
+    pub spheres: Vec<GpuSphere>,
+    #[storage(4, read_only)]
+    pub triangles: Vec<Triangle>,
+    #[storage(5, read_only)]
+    pub meshes: Vec<MeshInfo>,
+}
+
+pub fn prepare_meshinfo(
+    mesh_handles: Query<&Handle<Mesh>>,
+    meshes: Res<Assets<Mesh>>,
+    mut ray_tracing_info: ResMut<RayTracingInfo>,
+) {
+    for handle in mesh_handles.iter() {
+        let mesh = meshes.get(handle).unwrap();
+        let (Some(pos), Some(norm)) = (
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION),
+            mesh.attribute(Mesh::ATTRIBUTE_NORMAL),
+        ) else {
+            println!("Mesh missing attribute");
+            continue;
+        };
+        let pos: Vec<&[f32; 3]> = pos.as_float3().unwrap().iter().collect();
+        let norm: Vec<&[f32; 3]> = norm.as_float3().unwrap().iter().collect();
+        let len = mesh.indices().unwrap().len();
+        let indices: Vec<usize> = mesh.indices().unwrap().iter().collect();
+        let triangle_len = ray_tracing_info.triangles.len();
+        ray_tracing_info.meshes.push(MeshInfo {
+            first_tri: triangle_len as u32,
+            tri_count: len as u32 / 3,
+        });
+        for i in (0..len).step_by(3) {
+            let a = indices[i];
+            let b = indices[i + 1];
+            let c = indices[i + 2];
+            let tri = Triangle {
+                pos: [
+                    pos[a].to_owned().into(),
+                    pos[b].to_owned().into(),
+                    pos[c].to_owned().into(),
+                ],
+                norm: [
+                    norm[a].to_owned().into(),
+                    norm[b].to_owned().into(),
+                    norm[c].to_owned().into(),
+                ],
+            };
+            ray_tracing_info.triangles.push(tri);
+        }
+    }
 }
 
 impl FromWorld for RayTracingPipeline {
