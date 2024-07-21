@@ -1,8 +1,10 @@
 use bevy::{
     core_pipeline::{core_3d::graph::Core3d, prepass::MotionVectorPrepass},
+    diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     prelude::*,
     render::camera::CameraRenderGraph,
 };
+use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use ray_tracing::{
     fly_cam::{FlyCam, NoCameraPlayerPlugin},
     ray_tracing::{RayTracingGraph, RayTracingInfo, RayTracingPlugin},
@@ -10,7 +12,14 @@ use ray_tracing::{
 
 fn main() {
     App::new()
-        .add_plugins((DefaultPlugins, NoCameraPlayerPlugin, RayTracingPlugin))
+        .add_plugins((
+            DefaultPlugins,
+            NoCameraPlayerPlugin,
+            RayTracingPlugin,
+            WorldInspectorPlugin::default(),
+            FrameTimeDiagnosticsPlugin,
+            LogDiagnosticsPlugin::default(),
+        ))
         .add_systems(Startup, setup)
         .add_systems(Update, (close_on_q, change_render_graph, rotate))
         .run();
@@ -47,7 +56,7 @@ fn setup(
     commands.insert_resource(RayTracingInfo {
         ..Default::default()
     });
-    let material_black = materials.add(Color::BLACK);
+    let material_blue = materials.add(Color::from(LinearRgba::BLUE));
     let material_red = materials.add(Color::srgb(1.0, 0.0, 0.0));
     commands.spawn((
         Camera3dBundle {
@@ -61,7 +70,7 @@ fn setup(
     commands.spawn((
         MaterialMeshBundle {
             mesh: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
-            material: material_black.clone(),
+            material: material_blue.clone(),
             transform: Transform::from_rotation(Quat::from_axis_angle(
                 Vec3::X,
                 45.0_f32.to_radians(),
@@ -72,13 +81,31 @@ fn setup(
     ));
     commands.spawn(MaterialMeshBundle {
         mesh: meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(5.0))),
-        material: material_black,
+        material: material_blue,
         ..default()
     });
     commands.spawn(MaterialMeshBundle {
         mesh: meshes.add(Sphere::new(0.5).mesh()),
-        material: material_red,
+        material: material_red.clone(),
         transform: Transform::from_xyz(1., 0.5, 1.),
+        ..default()
+    });
+    commands.spawn(MaterialMeshBundle {
+        mesh: meshes.add(Sphere::new(0.5).mesh()),
+        material: material_red.clone(),
+        transform: Transform::from_xyz(-1., 0.5, 1.),
+        ..default()
+    });
+    commands.spawn(MaterialMeshBundle {
+        mesh: meshes.add(Sphere::new(0.5).mesh()),
+        material: material_red.clone(),
+        transform: Transform::from_xyz(1., 0.5, -1.),
+        ..default()
+    });
+    commands.spawn(MaterialMeshBundle {
+        mesh: meshes.add(Sphere::new(0.5).mesh()),
+        material: material_red.clone(),
+        transform: Transform::from_xyz(-1., 0.5, -1.),
         ..default()
     });
     commands.spawn(PointLightBundle {

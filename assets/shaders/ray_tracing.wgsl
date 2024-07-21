@@ -5,23 +5,32 @@
 @group(0) @binding(0) var<uniform> view: View;
 @group(0) @binding(1) var<uniform> globals: Globals;
 @group(0) @binding(2) var motion_vector_prepass_texture: texture_2d<f32>;
-@group(1) @binding(1) var<uniform> frame_count: u32;
-@group(1) @binding(2) var<storage> spheres: array<Sphere>;
-@group(1) @binding(3) var<storage> lights: array<Light>;
-@group(1) @binding(4) var<storage> triangles: array<Triangle>;
-@group(1) @binding(5) var<storage> mesh_info: array<MeshInfo>;
+@group(1) @binding(0) var<uniform> frame_count: u32;
+@group(1) @binding(1) var<storage> triangles: array<Triangle>;
+@group(1) @binding(2) var<storage> mesh_info: array<MeshInfo>;
+@group(1) @binding(3) var<storage> vertices: array<Vertex>;
+@group(1) @binding(4) var<storage> materials: array<Material>;
+
+struct Vertex{
+    pos: vec3<f32>,
+    norm: vec3<f32>,
+}
 
 struct Triangle{
-    pos_a: vec3<f32>,
-    pos_b: vec3<f32>,
-    pos_c: vec3<f32>,
-    norm_a: vec3<f32>,
-    norm_b: vec3<f32>,
-    norm_c: vec3<f32>,
+    pos_a: u32,
+    pos_b: u32,
+    pos_c: u32,
 }
 struct MeshInfo{
     index: u32,
     count: u32,
+    material: u32,
+    aabb_left_bottom: vec3<f32>,
+    aabb_right_top: vec3<f32>,
+}
+
+struct Material {
+    color: vec4<f32>,
 }
 
 var<private> uv: vec2<f32>;
@@ -69,44 +78,16 @@ struct Ray {
     direction: vec3<f32>
 }
 
-struct Sphere {
-    center: vec3<f32>,
-    radius: f32,
-    material: vec3<f32>,
-    light: vec3<f32>,
-}
-
 struct HitRecord {
     hit: bool,
     point: vec3<f32>,
     normal: vec3<f32>,
     t: f32,
-    color: vec3<f32>,
-    light: vec3<f32>,
+    material: u32,
 }
 
 fn no_hit() -> HitRecord {
-    return HitRecord(false, vec3(0.), vec3(0.), 0., vec3(0.), vec3(0.0));
-}
-
-fn hit_sphere(ray: Ray, sphere: Sphere) -> HitRecord {
-    let pos = ray.origin - sphere.center;
-    let a = dot(ray.direction, ray.direction);
-    let b = dot(pos, ray.direction);
-    let c = dot(pos, pos) - sphere.radius * sphere.radius;
-    let dis = b * b - a * c;
-    if dis < 0. {
-        return no_hit();
-    }
-    let t = (-b - sqrt(dis)) / a;
-    if t < 0. {
-        return no_hit();
-    }
-    let hit = pos + ray.direction * t;
-    let norm = normalize(hit);
-    let point = hit + sphere.center;
-    let light = sphere.light;
-    return HitRecord(true, point, norm, t, sphere.material, light);
+    return HitRecord(false, vec3(0.), vec3(0.), 0., 0);
 }
 
 struct Reservoir {
@@ -134,34 +115,15 @@ fn update_reservoir(res: Reservoir, sample: f32, weight: f32) -> Reservoir {
     return Reservoir(x, w, w_total, res.num + 1);
 }
 
-struct Light {
-    pos: vec3<f32>,
-    col: vec4<f32>,
-    str: f32,
-}
-
-const RED: vec3<f32> = vec3(1.0, 0.0, 0.0);
-const GREEN: vec3<f32> = vec3(0.0, 1.0, 0.0);
-const BLUE: vec3<f32> = vec3(0.0, 0.0, 1.0);
-
-fn sample_lights() -> Light {
-    let length = arrayLength(&lights);
-    if length > 0 {
-        return lights[randint(length)];
-    } else {
-        return Light(vec3(0.0), vec4(0.0), 0.0);
-        // return Light(vec3(0.0), vec4(1.0), 1.0);
-    }
-    // return Light(vec3(0.0, 50.0, 0.0), vec4(1.0), 1.0);
-}
-
 fn ray_triangle(ray: Ray, tri: Triangle) -> HitRecord {
-    var hit = no_hit();
-    let edge_ab = tri.pos_b - tri.pos_a;
-    let edge_ac = tri.pos_c - tri.pos_a;
+    let vertex_a = vertices[tri.pos_a];
+    let vertex_b = vertices[tri.pos_b];
+    let vertex_c = vertices[tri.pos_c];
+    let edge_ab = vertex_b.pos - vertex_a.pos;
+    let edge_ac = vertex_c.pos - vertex_a.pos;
     let norm = cross(edge_ab, edge_ac);
     let ray_cross = cross(ray.direction, edge_ac);
-    let ao = ray.origin - tri.pos_a;
+    let ao = ray.origin - vertex_a.pos;
     let dao = cross(ao, ray.direction);
 
     let det = -dot(ray.direction, norm);
@@ -172,58 +134,36 @@ fn ray_triangle(ray: Ray, tri: Triangle) -> HitRecord {
     let v = -dot(edge_ab, dao) * inv_det;
     let w = 1f - u - v;
 
-    hit = HitRecord(det >=1e-6 && dst >= 0f && u >= 0f && v >= 0f && w >= 0f, ray.origin + ray.direction * dst, normalize(tri.norm_a * w + tri.norm_b * u + tri.norm_c * v), dst, vec3(1.0), vec3(0.0));
-        
-    // let det = dot(edge_ab, ray_cross);
+    return HitRecord(det >=1e-6 && dst >= 0f && u >= 0f && v >= 0f && w >= 0f, ray.origin + ray.direction * dst, 
+                    normalize(vertex_a.norm * w + vertex_b.norm * u + vertex_c.norm * v), dst, 0);
+}
 
-    // if det > -0.00001 && det < 0.00001 {
-    //     return hit;
-    // }
-    
-    // let inv_det = 1.0 / det;
-    // let s = ray.origin - tri.pos_a;
-    // let u = inv_det * dot(s, ray_cross);
-    // if u < 0.0 || u > 1.0 {
-    //     return hit;
-    // }
-
-    // let s_cross = cross(s, edge_ab);
-    // let v = inv_det * dot(ray.direction, s_cross);
-    // if v < 0.0 || u + v > 1.0 {
-    //     return hit;
-    // }
-    // let t = inv_det * dot(edge_ac, s_cross);
-    // if t > 0.00001 {
-    //     hit = HitRecord(true, ray.origin + ray.direction * t, cross(edge_ab, edge_ac) * 0.5 + 0.5, t, vec3(1.0), vec3(0.0));
-    // }
-    return hit;
+fn ray_aabb(ray: Ray, lb: vec3<f32>, rt: vec3<f32>) -> bool {
+    let ray_inv = 1.0 / ray.direction;
+    let t1 = (lb - ray.origin) * ray_inv;
+    let t2 = (rt - ray.origin) * ray_inv;
+    let tmin = max(max(min(t1.x, t2.x), min(t1.y, t2.y)), min(t1.z, t2.z));
+    let tmax = min(min(max(t1.x, t2.x), max(t1.y, t2.y)), max(t1.z, t2.z));
+    return tmax >= tmin;
 }
 
 fn hit_triangles(ray: Ray) -> HitRecord {
     var hit = no_hit();
-    let length = i32(arrayLength(&triangles));
+    let length = i32(arrayLength(&mesh_info));
     for (var i = 0; i < length; i++) {
-        let record = ray_triangle(ray, triangles[i]);
-        if !record.hit {
+        let mesh = mesh_info[i];
+        if !ray_aabb(ray, mesh.aabb_left_bottom, mesh.aabb_right_top) {
             continue;
         }
-        if !hit.hit || hit.t > record.t {
-            hit = record;
-        }
-    }
-    return hit;
-}
-
-fn hit_scene(ray: Ray) -> HitRecord {
-    var hit = no_hit();
-    let length = i32(arrayLength(&spheres));
-    for (var i = 0; i < length; i++) {
-        let record = hit_sphere(ray, spheres[i]);
-        if !record.hit {
-            continue;
-        }
-        if !hit.hit || hit.t > record.t{
-            hit = record;
+        for (var j = mesh.index; j < mesh.index + mesh.count; j++) {
+            var record = ray_triangle(ray, triangles[j]);
+            record.material = mesh.material;
+            if !record.hit {
+                continue;
+            }
+            if !hit.hit || hit.t > record.t {
+                hit = record;
+            }
         }
     }
     return hit;
@@ -261,9 +201,11 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     //     }
     // }
     let record = hit_triangles(Ray(origin, dir));
-    // let record = ray_triangle(Ray(origin, dir), triangles[0]);
     if record.hit {
-        return vec4((record.normal * 0.5 + 0.5 ), 1.0);
+        if record.material >= 100 {
+            return vec4(0.5 + f32(record.material - 100u) / 6.0);
+        }
+        return materials[record.material].color * dot(record.normal, vec3(0f, 1f, 0f));
     } else {
         return vec4(0.0);
     }

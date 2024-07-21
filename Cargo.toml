@@ -6,7 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bevy = { version = "0.14.0-rc.3", features = ["wayland", "dynamic_linking", "embedded_watcher", "file_watcher"] }
+bevy = { version = "0.14.0", features = ["wayland", "dynamic_linking", "embedded_watcher", "file_watcher"] }
+bevy-inspector-egui = "0.25.1"
+itertools = "0.13.0"
 
 [profile.dev]
 opt-level = 1
