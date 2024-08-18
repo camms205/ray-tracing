@@ -1,6 +1,8 @@
 // pub mod camera;
 // pub mod cpu_raytracing;
 pub mod fly_cam;
+mod node;
+mod pipeline;
 pub mod ray_tracing;
 // pub mod hittable;
 // pub mod light;
