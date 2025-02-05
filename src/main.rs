@@ -7,7 +7,7 @@ use bevy::{
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use ray_tracing::{
     fly_cam::{FlyCam, NoCameraPlayerPlugin},
-    ray_tracing::{RayTracingGraph, RayTracingInfo, RayTracingPlugin},
+    ray_tracing::{RayTracingGraph, RayTracingPlugin},
 };
 
 fn main() {
@@ -53,9 +53,6 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    commands.insert_resource(RayTracingInfo {
-        ..Default::default()
-    });
     let material_blue = materials.add(Color::from(LinearRgba::BLUE));
     let material_red = materials.add(Color::srgb(1.0, 0.0, 0.0));
     commands.spawn((

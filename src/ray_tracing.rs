@@ -27,7 +27,8 @@ pub struct RayTracingPlugin;
 
 impl Plugin for RayTracingPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(Msaa::Off);
+        app.insert_resource(Msaa::Off)
+            .insert_resource(RayTracingInfo::default());
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .add_systems(ExtractSchedule, prepare_meshinfo)
